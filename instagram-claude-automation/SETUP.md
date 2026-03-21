@@ -80,7 +80,57 @@ python main.py --type reel --video-url https://example.com/video.mp4 --topic "te
 python main.py --generate-only --topic "fitness tips" --mock
 ```
 
-## Step 7: Post for Real
+## Step 7: Connect Google Photos (Google One Backup)
+
+If you back up your iPhone photos/videos to Google One, this is the easiest way
+to access your entire library.
+
+### 7a. Enable the Google Photos Library API
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project (or use an existing one)
+3. Enable the **Photos Library API**: [direct link](https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com)
+4. Go to **APIs & Services → Credentials**
+5. Click **Create Credentials → OAuth 2.0 Client ID**
+   - Application type: **Desktop app**
+   - Name: "Instagram Automation"
+6. Download the JSON file and save it as `credentials.json` in the project root
+
+### 7b. Authorize (First Time Only)
+
+```bash
+python main.py sync --browse --mock
+```
+
+This will print a URL — open it in your browser, sign in with the Google account
+that has your Google One backup, grant read-only access, and paste the code back.
+The token is saved locally and auto-refreshes.
+
+### 7c. Sync and Post
+
+```bash
+# See your recent photos/videos
+python main.py sync --browse --count 20
+
+# Sync last 24h of media to local inbox
+python main.py sync --hours 24
+
+# Sync AND auto-post videos as Reels with Claude captions
+python main.py sync --hours 24 --auto-post --topic "my day"
+
+# List your albums
+python main.py sync --list-albums
+```
+
+### 7d. Daily Auto-Sync (Optional Cron Job)
+
+Add to your crontab (`crontab -e`) to sync daily at 8 AM:
+
+```cron
+0 8 * * * cd /path/to/instagram-claude-automation && /path/to/venv/bin/python main.py sync --hours 24 --auto-post --topic "daily content" >> sync.log 2>&1
+```
+
+## Step 8: Post for Real
 
 ```bash
 # Generate content + post a Reel

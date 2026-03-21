@@ -20,6 +20,18 @@ Usage examples:
 
   # Dry run (mock mode, no real API calls)
   python main.py --type reel --video-url https://example.com/v.mp4 --topic "test" --mock
+
+  # Sync from Google Photos (Google One backup) and auto-post
+  python main.py sync --hours 24 --auto-post --topic "my day"
+
+  # Browse your Google Photos library
+  python main.py sync --browse --count 20
+
+  # Start the upload server (receive files from iPhone)
+  python main.py server --port 5555 --auto-post --topic "lifestyle"
+
+  # Watch a folder for new media (iCloud sync, Dropbox, etc.)
+  python main.py watch --watch-dir ~/icloud_photos --auto-post --topic "travel"
 """
 
 import argparse
@@ -170,13 +182,78 @@ def handle_interactive() -> None:
         print(f"\nClaude: {response}\n")
 
 
+def handle_server(args: argparse.Namespace) -> None:
+    """Start the Flask upload server for iPhone integration."""
+    import upload_server
+    upload_server.AUTO_POST = args.auto_post
+    upload_server.DEFAULT_TOPIC = args.topic or "lifestyle"
+    if args.no_auth:
+        upload_server.UPLOAD_API_KEY = ""
+    elif not upload_server.UPLOAD_API_KEY:
+        key = upload_server._generate_api_key()
+        upload_server.UPLOAD_API_KEY = key
+        print(f"\nUPLOAD API KEY: {key}\n")
+
+    print(f"Starting upload server on http://{args.host}:{args.port}")
+    upload_server.app.run(host=args.host, port=args.port, debug=False)
+
+
+def handle_sync(args: argparse.Namespace) -> None:
+    """Sync media from Google Photos (Google One backup)."""
+    import google_photos
+
+    if args.list_albums:
+        google_photos.browse_albums()
+        return
+
+    if args.browse:
+        google_photos.browse_library(page_size=args.count)
+        return
+
+    # Default: sync recent media
+    print(f"Syncing last {args.hours}h of media from Google Photos...")
+    google_photos.sync_and_report(hours=args.hours)
+
+    if args.auto_post:
+        from pathlib import Path
+        inbox = config.UPLOAD_DIR
+        for f in sorted(inbox.iterdir()):
+            if f.suffix.lower() in {".mp4", ".mov", ".m4v"}:
+                topic = args.topic or "lifestyle"
+                print(f"\nAuto-posting {f.name}...")
+                caption = claude_helper.generate_caption(topic=topic)
+                hashtags = claude_helper.generate_hashtags(topic=topic, count=8)
+                full_caption = f"{caption}\n\n{hashtags}"
+                try:
+                    media_id = instagram_poster.post_reel_local(str(f), full_caption)
+                    print(f"  Posted! Media ID: {media_id}")
+                except InstagramAPIError as e:
+                    print(f"  Failed: {e}")
+
+
+def handle_watch(args: argparse.Namespace) -> None:
+    """Start the media folder watcher."""
+    import media_watcher
+    # Re-use media_watcher's main with sys.argv override
+    watch_args = ["--watch-dir", args.watch_dir, "--topic", args.topic or "lifestyle"]
+    if args.auto_post:
+        watch_args.append("--auto-post")
+    if config.MOCK_MODE:
+        watch_args.append("--mock")
+
+    sys.argv = ["media_watcher"] + watch_args
+    media_watcher.main()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Instagram Claude Automation — post Reels & Stories with AI-generated content.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    subparsers = parser.add_subparsers(dest="command")
 
+    # --- Direct post mode (default / no subcommand) ---
     # Post type
     parser.add_argument(
         "--type", "-t",
@@ -206,22 +283,57 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true", help="Enable mock/dry-run mode (no real API calls).")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging.")
 
+    # --- Server subcommand ---
+    server_parser = subparsers.add_parser("server", help="Start upload server for iPhone")
+    server_parser.add_argument("--port", type=int, default=5555)
+    server_parser.add_argument("--host", default="0.0.0.0")
+    server_parser.add_argument("--auto-post", action="store_true")
+    server_parser.add_argument("--topic", default="lifestyle")
+    server_parser.add_argument("--no-auth", action="store_true")
+    server_parser.add_argument("--mock", action="store_true")
+    server_parser.add_argument("--verbose", "-v", action="store_true")
+
+    # --- Google Photos sync subcommand ---
+    sync_parser = subparsers.add_parser("sync", help="Sync from Google Photos (Google One)")
+    sync_parser.add_argument("--hours", type=int, default=24, help="Sync media from last N hours (default: 24)")
+    sync_parser.add_argument("--count", type=int, default=25, help="Max items to sync")
+    sync_parser.add_argument("--browse", action="store_true", help="Browse recent media items")
+    sync_parser.add_argument("--list-albums", action="store_true", help="List your Google Photos albums")
+    sync_parser.add_argument("--auto-post", action="store_true", help="Auto-post synced videos as Reels")
+    sync_parser.add_argument("--topic", default="lifestyle", help="Topic for auto-generated captions")
+    sync_parser.add_argument("--mock", action="store_true")
+    sync_parser.add_argument("--verbose", "-v", action="store_true")
+
+    # --- Watch subcommand ---
+    watch_parser = subparsers.add_parser("watch", help="Watch folder for new media")
+    watch_parser.add_argument("--watch-dir", "-w", required=True)
+    watch_parser.add_argument("--topic", default="lifestyle")
+    watch_parser.add_argument("--auto-post", action="store_true")
+    watch_parser.add_argument("--mock", action="store_true")
+    watch_parser.add_argument("--verbose", "-v", action="store_true")
+
     args = parser.parse_args()
 
     # Override mock mode from CLI
-    if args.mock:
+    if getattr(args, "mock", False):
         config.MOCK_MODE = True
 
-    setup_logging(args.verbose)
+    setup_logging(getattr(args, "verbose", False))
 
     try:
-        if args.interactive:
+        if args.command == "server":
+            handle_server(args)
+        elif args.command == "sync":
+            handle_sync(args)
+        elif args.command == "watch":
+            handle_watch(args)
+        elif getattr(args, "interactive", False):
             handle_interactive()
-        elif args.generate_only:
+        elif getattr(args, "generate_only", False):
             handle_generate_only(args)
-        elif args.type == "reel":
+        elif getattr(args, "type", None) == "reel":
             handle_reel(args)
-        elif args.type == "story":
+        elif getattr(args, "type", None) == "story":
             handle_story(args)
         else:
             parser.print_help()

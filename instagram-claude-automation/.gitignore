@@ -7,3 +7,6 @@ venv/
 dist/
 build/
 .pytest_cache/
+credentials.json
+.google_token.json
+media_inbox/

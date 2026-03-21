@@ -46,3 +46,4 @@ MAX_HASHTAGS = 30  # IG limit
 PUBLISHING_LIMIT_PER_24H = 100  # approximate IG rate limit
 STATUS_POLL_INTERVAL = 5  # seconds between status checks
 STATUS_POLL_MAX_ATTEMPTS = 60  # max polls (~5 min)
+UPLOAD_DIR = Path(__file__).resolve().parent / "media_inbox"
