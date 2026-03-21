@@ -1,25 +1,51 @@
-# iPhone Setup — Connect Your Photo Library
+# iPhone → Instagram: Complete Setup Guide
 
-This guide covers **3 methods** to get your iPhone photos/videos into the automation pipeline. Pick the one that fits your workflow.
+This guide walks you through **every tap** to connect your iPhone Camera Roll
+to the automation pipeline. You'll end up with two Shortcuts:
+
+1. **"Post to IG"** — one-tap: select media → Claude generates caption → posts to Instagram
+2. **"IG Caption"** — generate a caption you can preview/copy without uploading
 
 ---
 
-## Method 1: iOS Shortcuts (Recommended — One-Tap Posting)
+## Part 1: Start the Server (Your Computer)
 
-This creates a **Share Sheet shortcut** so you can select any photo/video in your Camera Roll, tap Share → "Post to Instagram", and it gets uploaded + posted automatically.
-
-### Step 1: Start the Upload Server
-
-On your computer (must be on the same Wi-Fi as your iPhone):
+### 1a. Install & Configure (one-time)
 
 ```bash
 cd instagram-claude-automation
-python upload_server.py --auto-post --topic "my content"
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env
+# Open .env and fill in:
+#   IG_USER_ID=your_id
+#   ACCESS_TOKEN=your_token
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   UPLOAD_API_KEY=pick_any_secret_string
 ```
 
-Note the **API key** printed on startup and your computer's **local IP** (e.g., `192.168.1.100`).
+Setting a permanent `UPLOAD_API_KEY` in `.env` means you won't need to update
+your Shortcut every time you restart the server.
 
-Find your IP:
+### 1b. Start the Server
+
+```bash
+python main.py server --auto-post --topic "lifestyle"
+```
+
+Output:
+```
+Starting upload server on http://0.0.0.0:5555
+Auto-post: ON
+Mock mode: OFF
+```
+
+### 1c. Find Your Computer's IP Address
+
+Your iPhone needs to reach the server over Wi-Fi. Find your IP:
+
 ```bash
 # macOS
 ipconfig getifaddr en0
@@ -31,171 +57,263 @@ hostname -I | awk '{print $1}'
 ipconfig | findstr IPv4
 ```
 
-### Step 2: Create the iOS Shortcut
+Example: `192.168.1.42` — you'll use `http://192.168.1.42:5555` in the Shortcuts.
 
-1. Open the **Shortcuts** app on your iPhone
-2. Tap **+** to create a new shortcut
-3. Add these actions in order:
-
-#### Action 1: "Receive" input
-- Tap **"Any"** at the top → select **"Receive Media from Share Sheet"**
-- Accept: **Images, Media**
-
-#### Action 2: "Get Details of Images"
-(This gets the file data)
-
-#### Action 3: "Get Contents of URL" (this is the HTTP request)
-- **URL**: `http://YOUR_COMPUTER_IP:5555/upload`
-- **Method**: POST
-- **Headers**:
-  - Key: `X-API-Key` → Value: `YOUR_API_KEY_FROM_SERVER`
-- **Request Body**: Form
-  - Key: `file` → Value: **Shortcut Input** (tap the variable)
-  - Key: `topic` → Value: `my content` (or use "Ask Each Time")
-  - Key: `auto_post` → Value: `true`
-
-#### Action 4: "Show Result"
-- Input: **Contents of URL** (the response)
-
-4. Name it **"Post to Instagram"**
-5. Tap the **settings icon** → Enable **"Show in Share Sheet"**
-6. Limit to: **Images, Media**
-
-### Step 3: Use It
-
-1. Open **Photos** app
-2. Select one or more photos/videos
-3. Tap **Share** → scroll down → **"Post to Instagram"**
-4. Done! Claude generates the caption and it posts automatically.
-
-### Batch Upload Shortcut (Multiple Files)
-
-For uploading your whole camera roll or albums, create a second shortcut:
-
-#### Action 1: "Find Photos"
-- Add filter: **Album is [your album]** (or no filter for all)
-- Sort by: Date Taken, Latest First
-- Limit: 10 (adjust as needed)
-
-#### Action 2: "Repeat with Each" (loop over photos)
-- Inside the loop:
-  - **"Get Contents of URL"**
-    - URL: `http://YOUR_IP:5555/upload`
-    - Method: POST
-    - Headers: `X-API-Key: YOUR_KEY`
-    - Body Form: `file` = Repeat Item, `topic` = your topic
-
-#### Action 3: "Show Notification"
-- "Uploaded X photos!"
-
----
-
-## Method 2: iCloud Photos Sync + Folder Watcher
-
-If you want **automatic, hands-free syncing** of your entire photo library:
-
-### macOS Setup
-
-1. Enable **iCloud Photos** on your iPhone (Settings → [Your Name] → iCloud → Photos)
-2. On your Mac, enable iCloud Photos in **System Settings → Apple ID → iCloud → Photos**
-3. Photos sync to: `~/Pictures/Photos Library.photoslibrary`
-
-For a **simpler folder approach**, use iCloud Drive:
-- Create a folder in Files app: `iCloud Drive/InstaQueue/`
-- That syncs to: `~/Library/Mobile Documents/com~apple~CloudDocs/InstaQueue/`
-
-4. Run the watcher:
+### 1d. Quick Test (from Terminal)
 
 ```bash
-python media_watcher.py \
-  --watch-dir ~/Library/Mobile\ Documents/com~apple~CloudDocs/InstaQueue/ \
-  --auto-post \
-  --topic "my content"
-```
-
-### Any Platform (Dropbox/Google Drive/OneDrive)
-
-1. Install the sync client on both iPhone and computer
-2. Set up a shared folder (e.g., `Dropbox/InstaQueue/`)
-3. On iPhone, save/move photos to that folder
-4. Run the watcher on your computer:
-
-```bash
-python media_watcher.py \
-  --watch-dir ~/Dropbox/InstaQueue/ \
-  --auto-post \
-  --topic "travel"
-```
-
-### How the Watcher Works
-
-- Monitors the folder for new files
-- Waits for the file to finish syncing (stable file size)
-- Generates a Claude-powered caption
-- Uploads and posts to Instagram as a Reel (videos) or queues (images)
-
----
-
-## Method 3: AirDrop + Manual Post
-
-Simplest approach, no server needed:
-
-1. AirDrop photos/videos from iPhone to your Mac
-2. They land in `~/Downloads/`
-3. Post directly:
-
-```bash
-python main.py --type reel --file ~/Downloads/my_video.mp4 --topic "day in my life"
-```
-
-Or watch the Downloads folder:
-
-```bash
-python media_watcher.py --watch-dir ~/Downloads --topic "lifestyle"
+# Should return {"status":"ok",...}
+curl http://192.168.1.42:5555/health
 ```
 
 ---
 
-## Method Comparison
+## Part 2: Create "Post to IG" Shortcut (One-Tap Posting)
 
-| Feature | Shortcuts (1) | Folder Sync (2) | AirDrop (3) |
-|---------|:---:|:---:|:---:|
-| One-tap from iPhone | Yes | No (auto) | No |
-| Batch upload | Yes | Yes | Manual |
-| Auto-posting | Yes | Yes | No |
-| Works over internet | With port forwarding | With cloud sync | No |
-| Setup difficulty | Medium | Easy | None |
-| Needs server running | Yes | Yes | No |
+Open the **Shortcuts** app on your iPhone. Tap **+** in the top right.
+
+### Action 1: Receive Input
+
+1. Tap the text at the very top that says **"Any"** (or **"Shortcut Input"**)
+2. Change it to: **Receive [Images and Media] from [Share Sheet]**
+   - Tap "Any" → uncheck all except **Images** and **Media**
+
+### Action 2: Ask for Topic
+
+1. Tap **+ Add Action** → search **"Ask for Input"**
+2. Configure:
+   - Question: `What's this post about?`
+   - Input Type: **Text**
+   - Default Answer: `lifestyle` (or whatever your default is)
+
+### Action 3: Upload to Server
+
+1. Tap **+ Add Action** → search **"Get Contents of URL"**
+2. Configure:
+   - **URL**: `http://YOUR_IP:5555/shortcut/upload-and-post`
+   - Tap **Show More**
+   - **Method**: POST
+   - **Headers**: Add header:
+     - Key: `X-API-Key`
+     - Value: `your_upload_api_key` (from your `.env`)
+   - **Request Body**: **Form**
+   - Add these form fields:
+     - `file` → tap value → select **Shortcut Input** (the media)
+     - `topic` → tap value → select **Provided Input** (from Ask for Input)
+     - `confirm` → type `true`
+     - `post_type` → type `reel` (or `auto` to let server decide)
+
+### Action 4: Show Result
+
+1. Tap **+ Add Action** → search **"Get Dictionary Value"**
+2. Get **Value** for key `message` in **Contents of URL**
+3. Tap **+ Add Action** → search **"Show Alert"** (or **"Show Notification"**)
+4. Set text to the **Dictionary Value** from the previous step
+
+### Final Steps
+
+1. Tap the shortcut name at the top → rename to **"Post to IG"**
+2. Tap the **settings icon** (ⓘ) at the top
+3. Enable **"Show in Share Sheet"**
+4. Under **Share Sheet Types**: select **Images** and **Media**
+5. Tap **Done**
+
+### How to Use
+
+1. Open **Photos** → find a video or photo
+2. Tap **Share** (the box-with-arrow icon)
+3. Scroll down → tap **"Post to IG"**
+4. Type what it's about (e.g., "morning workout") or accept the default
+5. Wait ~10 seconds → notification shows "Reel posted! Caption: ..."
 
 ---
 
-## Making It Work Over the Internet (Optional)
+## Part 3: Create "IG Caption" Shortcut (Caption Generator)
 
-By default, the upload server only works on your local network. To access it from anywhere:
+This shortcut generates a caption you can preview, copy, and paste into
+Instagram manually. No media upload needed.
 
-### Option A: Tailscale (Recommended — Free & Secure)
-1. Install Tailscale on your computer and iPhone
-2. Both devices get a stable IP on your Tailscale network
-3. Use the Tailscale IP in your shortcut (e.g., `http://100.x.x.x:5555/upload`)
+### Action 1: Ask for Topic
 
-### Option B: ngrok (Quick & Easy)
+1. **+ Add Action** → **"Ask for Input"**
+2. Question: `What's the caption about?`
+3. Input Type: **Text**
+
+### Action 2: Get Caption from Server
+
+1. **+ Add Action** → **"Get Contents of URL"**
+2. URL: `http://YOUR_IP:5555/shortcut/caption`
+3. Method: **POST**
+4. Headers: `X-API-Key` → `your_key`
+5. Request Body: **Form**
+   - `topic` → **Provided Input**
+   - `with_hashtags` → `true`
+
+### Action 3: Extract and Show
+
+1. **+ Add Action** → **"Get Dictionary Value"**
+   - Key: `full_caption`
+   - Dictionary: **Contents of URL**
+2. **+ Add Action** → **"Quick Look"**
+   - Input: **Dictionary Value** (shows the caption as a preview)
+3. **+ Add Action** → **"Copy to Clipboard"**
+   - Input: **Dictionary Value**
+4. **+ Add Action** → **"Show Notification"**
+   - Title: "Caption copied!"
+
+### How to Use
+
+1. Open **Shortcuts** → tap **"IG Caption"**
+2. Type your topic → tap Done
+3. Preview appears → dismiss it
+4. Caption is copied to clipboard → paste anywhere
+
+---
+
+## Part 4: Create "Batch Upload" Shortcut (Multiple Photos)
+
+For uploading an entire album or selection of photos:
+
+### Action 1: Find Photos
+
+1. **+ Add Action** → **"Find Photos"**
+2. Add Filter: **Album** is **[pick your album]**
+3. Sort by: **Creation Date**, **Latest First**
+4. Limit: **10** (adjust as needed)
+
+### Action 2: Loop and Upload
+
+1. **+ Add Action** → **"Repeat with Each"**
+   - Input: **Photos**
+2. Inside the repeat block:
+   - **+ Add Action** → **"Get Contents of URL"**
+   - URL: `http://YOUR_IP:5555/upload`
+   - Method: **POST**
+   - Headers: `X-API-Key` → `your_key`
+   - Body Form:
+     - `file` → **Repeat Item**
+     - `topic` → `batch upload`
+
+### Action 3: Done
+
+1. **+ Add Action** → **"Show Notification"**
+2. Text: `Uploaded photos to inbox!`
+
+Files land in the `media_inbox/` folder. Post them individually later:
+```bash
+python main.py --type reel --file media_inbox/FILE.mp4 --topic "my day"
+```
+
+---
+
+## Part 5: Making It Work From Anywhere
+
+By default, the server only works when your iPhone and computer are on the
+**same Wi-Fi network**. Here's how to make it work from anywhere:
+
+### Option A: Tailscale (Recommended)
+
+Free, secure, no port forwarding needed.
+
+1. Install **Tailscale** on your Mac/PC: [tailscale.com/download](https://tailscale.com/download)
+2. Install **Tailscale** on your iPhone from the App Store
+3. Sign in with the same account on both
+4. Your computer gets a stable IP like `100.64.0.2`
+5. Update your Shortcuts to use `http://100.64.0.2:5555/...`
+
+Works from any network — cellular, coffee shop WiFi, etc.
+
+### Option B: ngrok
+
 ```bash
 ngrok http 5555
 ```
-Use the ngrok URL in your shortcut (e.g., `https://abc123.ngrok.io/upload`).
-Note: URL changes each time unless you pay for a static domain.
 
-### Option C: Cloudflare Tunnel (Free & Stable)
+Gives you a URL like `https://abc123.ngrok-free.app` — use that in Shortcuts.
+Downside: URL changes each restart (pay $8/mo for a fixed one).
+
+### Option C: Cloudflare Tunnel
+
 ```bash
 cloudflared tunnel --url http://localhost:5555
 ```
 
+Free, stable, but slightly more setup.
+
 ---
 
-## Security Notes
+## Part 6: Full Workflow Example
 
-- The upload server generates a random **API key** on each start — save it
-- Set a permanent key in `.env`: `UPLOAD_API_KEY=your_chosen_key`
-- Never expose the server to the internet without authentication
-- Use HTTPS in production (Tailscale/ngrok handle this automatically)
-- The server validates file types and sizes before accepting uploads
+Here's the complete flow from iPhone to Instagram:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐     ┌───────────┐
+│   iPhone     │     │  Your Server │     │   Claude     │     │ Instagram │
+│  Camera Roll │────▶│  (port 5555) │────▶│  (Anthropic) │────▶│ Graph API │
+│              │     │              │     │              │     │           │
+│ Share Sheet  │     │ Saves file   │     │ Generates    │     │ Creates   │
+│ "Post to IG" │     │ to inbox     │     │ caption +    │     │ container │
+│              │     │              │     │ hashtags     │     │ Publishes │
+└─────────────┘     └──────────────┘     └─────────────┘     └───────────┘
+       │                    │                    │                    │
+       │    HTTP POST       │   API call         │   API calls       │
+       │    with media      │   with topic       │   with video +    │
+       │    + topic         │                    │   caption         │
+       └────────────────────┴────────────────────┴────────────────────┘
+                              ~15 seconds total
+```
+
+### End-to-End Test (Mock Mode First)
+
+Start server in mock mode:
+```bash
+python main.py server --auto-post --mock --no-auth
+```
+
+Test from another terminal:
+```bash
+# Create a dummy video
+echo "fake" > /tmp/test.mp4
+
+# Upload it
+curl -X POST http://localhost:5555/shortcut/upload-and-post \
+  -F "file=@/tmp/test.mp4" \
+  -F "topic=test post" \
+  -F "confirm=true"
+```
+
+Expected response:
+```json
+{
+  "status": "posted",
+  "caption": "[MOCK] This is a mock Claude response for testing.",
+  "media_id": "mock_media_id",
+  "message": "[MOCK] Reel posted about 'test post'!"
+}
+```
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Shortcut says "Could not connect" | Server not running, or wrong IP. Check `curl http://IP:5555/health` |
+| "401 Unauthorized" | Wrong API key in Shortcut header. Check `.env` UPLOAD_API_KEY |
+| Shortcut hangs for >30s | Video too large or server still processing. Check server terminal |
+| "Unsupported file type" | iPhone sent HEIC — the server accepts it. Check the file extension |
+| Works on WiFi but not cellular | Need Tailscale/ngrok. See Part 5 above |
+| Server crashed | Check terminal for error. Restart with `python main.py server --auto-post` |
+
+## API Endpoints Reference
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Health check |
+| `/upload` | POST | Upload single file to inbox |
+| `/upload/batch` | POST | Upload multiple files |
+| `/inbox` | GET | List files in inbox |
+| `/inbox/post/<file>` | POST | Post an inbox file to IG |
+| `/inbox/generate-caption` | POST | Generate caption only |
+| `/shortcut/upload-and-post` | POST | iOS Shortcut: upload + caption + post |
+| `/shortcut/caption` | POST | iOS Shortcut: generate caption text |

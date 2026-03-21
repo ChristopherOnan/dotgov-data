@@ -303,6 +303,146 @@ def generate_caption_endpoint():
 
 
 # ---------------------------------------------------------------------------
+# iOS Shortcuts-optimized endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/shortcut/upload-and-post", methods=["POST"])
+def shortcut_upload_and_post():
+    """
+    Single endpoint designed for iOS Shortcuts — upload + generate caption + post.
+
+    Accepts multipart form:
+      - file: Media file from Camera Roll
+      - topic: What the post is about (shows as "Ask Each Time" in Shortcuts)
+      - post_type: "reel" or "story" (default: "reel" for video, "story" for image)
+      - confirm: "true" to post, "false" to just preview caption (default: "true")
+
+    Returns a plain-text-friendly JSON response that Shortcuts can parse:
+      {
+        "status": "posted" | "preview",
+        "caption": "...",
+        "hashtags": "...",
+        "media_id": "..." (if posted),
+        "message": "human readable summary"
+      }
+    """
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file. Attach media from Camera Roll."}), 400
+
+    uploaded = request.files["file"]
+    if not uploaded.filename:
+        return jsonify({"status": "error", "message": "Empty file."}), 400
+
+    media_type = _get_media_type(uploaded.filename)
+    if not media_type:
+        return jsonify({"status": "error", "message": f"Unsupported format: {Path(uploaded.filename).suffix}"}), 400
+
+    # Save the file
+    try:
+        file_path, media_type = _save_file(uploaded)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+    topic = request.form.get("topic", DEFAULT_TOPIC)
+    post_type = request.form.get("post_type", "")
+    confirm = request.form.get("confirm", "true").lower() == "true"
+
+    # Auto-detect post type
+    if not post_type:
+        post_type = "reel" if media_type == "video" else "story"
+
+    # Generate caption with Claude
+    caption = claude_helper.generate_caption(topic=topic)
+    hashtags = claude_helper.generate_hashtags(topic=topic, count=8)
+    full_caption = f"{caption}\n\n{hashtags}"
+
+    result = {
+        "caption": caption,
+        "hashtags": hashtags,
+        "full_caption": full_caption,
+        "file": file_path.name,
+        "media_type": media_type,
+        "post_type": post_type,
+    }
+
+    if not confirm:
+        # Preview mode — return caption without posting
+        result["status"] = "preview"
+        result["message"] = f"Caption ready for '{topic}'. Send confirm=true to post."
+        return jsonify(result), 200
+
+    # Post it
+    if config.MOCK_MODE:
+        result["status"] = "posted"
+        result["media_id"] = "mock_media_id"
+        result["message"] = f"[MOCK] {post_type.title()} posted about '{topic}'!"
+        return jsonify(result), 201
+
+    try:
+        if post_type == "reel":
+            container_id = instagram_poster.create_reel_container_local(
+                file_path=str(file_path), caption=full_caption
+            )
+            media_id = instagram_poster.publish_container(container_id)
+        else:
+            # Story — queued for now (needs URL hosting for stories)
+            result["status"] = "queued"
+            result["message"] = f"Story saved. Post from inbox: POST /inbox/post/{file_path.name}"
+            return jsonify(result), 201
+
+        result["status"] = "posted"
+        result["media_id"] = media_id
+        result["message"] = f"Reel posted! Caption: {caption[:60]}..."
+        return jsonify(result), 201
+
+    except InstagramAPIError as e:
+        result["status"] = "error"
+        result["message"] = f"Post failed: {e}"
+        return jsonify(result), 500
+
+
+@app.route("/shortcut/caption", methods=["POST"])
+def shortcut_caption():
+    """
+    Generate just a caption — no file needed. For Shortcuts that generate
+    text first, then let you copy/paste.
+
+    Form fields:
+      - topic: Required
+      - audience: Optional
+      - tone: Optional
+      - with_hashtags: "true" (default) or "false"
+      - with_script: "true" to also get a Reel script
+
+    Returns plain-text-friendly JSON.
+    """
+    topic = request.form.get("topic", "")
+    if not topic:
+        return jsonify({"status": "error", "message": "Set a topic."}), 400
+
+    audience = request.form.get("audience", "general")
+    tone = request.form.get("tone", "engaging and authentic")
+    want_hashtags = request.form.get("with_hashtags", "true").lower() == "true"
+    want_script = request.form.get("with_script", "false").lower() == "true"
+
+    caption = claude_helper.generate_caption(topic=topic, audience=audience, tone=tone)
+
+    result = {"status": "ok", "caption": caption}
+
+    if want_hashtags:
+        hashtags = claude_helper.generate_hashtags(topic=topic, count=10)
+        result["hashtags"] = hashtags
+        result["full_caption"] = f"{caption}\n\n{hashtags}"
+
+    if want_script:
+        script = claude_helper.generate_reel_script(topic=topic)
+        result["reel_script"] = script
+
+    result["message"] = f"Caption for '{topic}' ({len(caption)} chars)"
+    return jsonify(result), 200
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -93,6 +93,67 @@ class TestBatchUpload:
         assert result["uploaded"] == 2
 
 
+class TestShortcutEndpoints:
+    def test_shortcut_upload_and_post_no_file(self, client):
+        resp = client.post("/shortcut/upload-and-post")
+        assert resp.status_code == 400
+        assert resp.get_json()["status"] == "error"
+
+    def test_shortcut_upload_and_post_preview(self, client):
+        data = {
+            "file": (io.BytesIO(b"fake video"), "reel.mp4"),
+            "topic": "test topic",
+            "confirm": "false",
+        }
+        resp = client.post("/shortcut/upload-and-post", data=data, content_type="multipart/form-data")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert result["status"] == "preview"
+        assert "caption" in result
+        assert "hashtags" in result
+
+    def test_shortcut_upload_and_post_confirm_mock(self, client):
+        import config
+        config.MOCK_MODE = True
+        data = {
+            "file": (io.BytesIO(b"fake video"), "reel.mp4"),
+            "topic": "test topic",
+            "confirm": "true",
+        }
+        resp = client.post("/shortcut/upload-and-post", data=data, content_type="multipart/form-data")
+        assert resp.status_code == 201
+        result = resp.get_json()
+        assert result["status"] == "posted"
+        assert result["media_id"] == "mock_media_id"
+        assert "message" in result
+
+    def test_shortcut_upload_unsupported_type(self, client):
+        data = {"file": (io.BytesIO(b"nope"), "file.pdf"), "topic": "test"}
+        resp = client.post("/shortcut/upload-and-post", data=data, content_type="multipart/form-data")
+        assert resp.status_code == 400
+
+    def test_shortcut_caption_no_topic(self, client):
+        resp = client.post("/shortcut/caption")
+        assert resp.status_code == 400
+
+    def test_shortcut_caption_with_topic(self, client):
+        data = {"topic": "fitness", "with_hashtags": "true"}
+        resp = client.post("/shortcut/caption", data=data)
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert result["status"] == "ok"
+        assert "caption" in result
+        assert "hashtags" in result
+        assert "full_caption" in result
+
+    def test_shortcut_caption_with_script(self, client):
+        data = {"topic": "cooking", "with_script": "true"}
+        resp = client.post("/shortcut/caption", data=data)
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert "reel_script" in result
+
+
 class TestAuth:
     def test_auth_required_when_key_set(self):
         upload_server.UPLOAD_API_KEY = "test_secret_key"
