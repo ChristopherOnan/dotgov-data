@@ -11,6 +11,8 @@ aethercouncil_loop.log
 calibration.jsonl
 sector_cache.json
 .agent_cache/
+scout_seen.json
+scout_digests/
 
 # Python
 __pycache__/

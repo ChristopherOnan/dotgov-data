@@ -29,6 +29,8 @@ ET = ZoneInfo("America/New_York")
 
 INTERVAL = int(os.getenv("LOOP_INTERVAL", "60"))       # seconds between scans
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "20"))      # ET hour for nightly report
+SCOUT_HOUR = int(os.getenv("SCOUT_HOUR", "7"))         # ET hour for daily X/web scout
+SCOUT_ENABLED = os.getenv("SCOUT_ENABLED", "1") == "1"
 LOG_FILE = os.getenv("LOOP_LOG", "aethercouncil_loop.log")
 START_EQUITY = float(os.getenv("START_EQUITY", "10000"))
 PAPER_EXECUTE = os.getenv("PAPER_EXECUTE") == "1"
@@ -138,16 +140,32 @@ async def one_cycle(risk: DailyRisk) -> dict:
     return out
 
 
+async def daily_scout_run() -> None:
+    """Fire the research scout once and log a one-line summary."""
+    try:
+        from daily_scout import run_daily_scout
+        out = await run_daily_scout()
+        log.info("daily scout: %d new items ($%.4f) -> %s",
+                 out["new"], out["cost_usd"], out["digest"])
+        print(out["summary"])
+    except Exception as e:  # noqa: BLE001 - scout must never kill the loop
+        log.error("daily scout error: %s", e, exc_info=True)
+
+
 async def main() -> None:
     risk = DailyRisk(START_EQUITY)
     last_report = None
-    log.info("loop start: mode=%s execute=%s interval=%ds", TRADING_MODE,
-             PAPER_EXECUTE, INTERVAL)
+    last_scout = None
+    log.info("loop start: mode=%s execute=%s interval=%ds scout=%s@%02d:00ET",
+             TRADING_MODE, PAPER_EXECUTE, INTERVAL, SCOUT_ENABLED, SCOUT_HOUR)
     while True:
         now = datetime.now(ET)
         if now.hour == REPORT_HOUR and last_report != now.date():
             print(nightly_report(risk.tokens_spent))
             last_report = now.date()
+        if SCOUT_ENABLED and now.hour == SCOUT_HOUR and last_scout != now.date():
+            await daily_scout_run()
+            last_scout = now.date()
         if in_trading_window(now):
             try:
                 await one_cycle(risk)
@@ -166,6 +184,8 @@ if __name__ == "__main__":
         print(f"now={now:%a %Y-%m-%d %H:%M ET}  window_open={in_trading_window(now)}")
     elif "--once" in sys.argv:
         print(asyncio.run(one_cycle(DailyRisk(START_EQUITY))))
+    elif "--scout" in sys.argv:      # run the research scout once (for cron)
+        asyncio.run(daily_scout_run())
     else:
         try:
             asyncio.run(main())
