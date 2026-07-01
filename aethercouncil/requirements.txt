@@ -1,0 +1,10 @@
+# Core (agent army + council)
+openai>=1.30
+
+# Live trading + data (optional until you go live/paper-execute)
+alpaca-py>=0.20
+websockets>=12.0
+
+# Note: market_data, market_context, bars, stream_indicators, calibration,
+# trading_engine risk logic, and run_loop's scheduler are STDLIB-ONLY and run
+# without the packages above. Install those only for live feeds/execution.

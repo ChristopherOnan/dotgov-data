@@ -1,0 +1,18 @@
+# AetherCouncil universe — paste your Barchart Top 100 + Robinhood screener
+# symbols here (one per line). Health/pharma are auto-excluded by universe.py.
+# Lines starting with # are ignored. Seeded with your declared names + tech/AI.
+ASTS
+RKLB
+ACHR
+NVDA
+TSLA
+PLTR
+AMD
+MSTR
+COIN
+HOOD
+SOFI
+MU
+SMCI
+AVGO
+ARM

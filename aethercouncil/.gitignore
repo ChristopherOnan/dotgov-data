@@ -1,0 +1,26 @@
+# Secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Runtime data (actual filenames the code writes)
+aethercouncil_loop.log
+*.log
+calibration.jsonl
+sector_cache.json
+.agent_cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
