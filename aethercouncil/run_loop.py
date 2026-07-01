@@ -31,6 +31,8 @@ INTERVAL = int(os.getenv("LOOP_INTERVAL", "60"))       # seconds between scans
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "20"))      # ET hour for nightly report
 SCOUT_HOUR = int(os.getenv("SCOUT_HOUR", "7"))         # ET hour for daily X/web scout
 SCOUT_ENABLED = os.getenv("SCOUT_ENABLED", "1") == "1"
+TUNE_DAY = int(os.getenv("TUNE_DAY", "6"))             # weekday to auto-tune (6=Sun)
+TUNE_ENABLED = os.getenv("TUNE_ENABLED", "1") == "1"
 LOG_FILE = os.getenv("LOOP_LOG", "aethercouncil_loop.log")
 START_EQUITY = float(os.getenv("START_EQUITY", "10000"))
 PAPER_EXECUTE = os.getenv("PAPER_EXECUTE") == "1"
@@ -177,6 +179,17 @@ async def reflect_now() -> None:
         log.error("reflection error: %s", e)
 
 
+def tune_now() -> None:
+    """Re-tune strategy params (OOS-gated). Never adopts an unvalidated setting."""
+    try:
+        from tuner import tune, _fmt
+        d = tune()
+        log.info("tune: adopted=%s", d.get("adopted"))
+        print(_fmt(d))
+    except Exception as e:  # noqa: BLE001 - tuning must never kill the loop
+        log.error("tune error: %s", e)
+
+
 async def daily_scout_run() -> None:
     """Fire the research scout once; log, notify ADOPT/TEST items."""
     try:
@@ -199,6 +212,7 @@ async def main() -> None:
     risk = DailyRisk(START_EQUITY)
     last_report = None
     last_scout = None
+    last_tune = None
     gate_notified = False
     log.info("loop start: mode=%s execute=%s interval=%ds scout=%s@%02d:00ET",
              TRADING_MODE, PAPER_EXECUTE, INTERVAL, SCOUT_ENABLED, SCOUT_HOUR)
@@ -215,6 +229,11 @@ async def main() -> None:
         if SCOUT_ENABLED and now.hour == SCOUT_HOUR and last_scout != now.date():
             await daily_scout_run()
             last_scout = now.date()
+        # weekly OOS-gated parameter re-tune (before the scout hour, once/week)
+        if (TUNE_ENABLED and now.weekday() == TUNE_DAY and now.hour == SCOUT_HOUR
+                and last_tune != now.date()):
+            await asyncio.to_thread(tune_now)
+            last_tune = now.date()
         if in_trading_window(now):
             try:
                 await one_cycle(risk)
@@ -256,6 +275,8 @@ if __name__ == "__main__":
         asyncio.run(reflect_now())
         from reflection import active_rules
         print(active_rules() or "(no rules yet — need resolved trades)")
+    elif "--tune" in sys.argv:       # re-tune strategy params (OOS-gated)
+        tune_now()
     else:
         try:
             asyncio.run(main())

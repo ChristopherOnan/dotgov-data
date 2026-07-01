@@ -99,8 +99,13 @@ def position_size(equity: float, entry: float, stop: float,
 
 
 def stop_from_atr(entry: float, atr: float) -> float:
-    """Volatility-based stop. Falls back to a 4% stop if no ATR."""
-    dist = STOP_ATR_MULT * atr if atr > 0 else entry * 0.04
+    """Volatility-based stop. Uses the tuned stop multiple; 4% fallback if no ATR."""
+    try:
+        from params import P
+        mult = float(P("stop_mult", STOP_ATR_MULT))
+    except Exception:  # noqa: BLE001
+        mult = STOP_ATR_MULT
+    dist = mult * atr if atr > 0 else entry * 0.04
     return round(entry - dist, 2)
 
 

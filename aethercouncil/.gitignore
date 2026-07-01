@@ -18,6 +18,7 @@ daily_risk.json
 memory.jsonl
 agent_scores.jsonl
 rules.json
+params.json
 
 # Python
 __pycache__/

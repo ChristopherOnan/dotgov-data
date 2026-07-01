@@ -117,8 +117,18 @@ class Signal:
 
 class LiveTA:
     """Aggregates indicators + emits a real-time signal per tick. LLM-free."""
-    def __init__(self, rsi_period=14, oversold=30.0, overbought=70.0,
+    def __init__(self, rsi_period=14, oversold=None, overbought=None,
                  require_vwap=False):
+        # default to TUNED params (params.json -> env -> 30/70) when unset, so a
+        # validated tune changes live behavior with no code change
+        if oversold is None or overbought is None:
+            try:
+                from params import P
+                oversold = P("oversold", 30.0) if oversold is None else oversold
+                overbought = P("overbought", 70.0) if overbought is None else overbought
+            except Exception:  # noqa: BLE001
+                oversold = 30.0 if oversold is None else oversold
+                overbought = 70.0 if overbought is None else overbought
         self.rsi = RSI(rsi_period)
         self.macd = MACD()
         self.vwap = VWAP()

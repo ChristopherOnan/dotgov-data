@@ -25,13 +25,14 @@ log = logging.getLogger("aethercouncil.backtest")
 COST_PER_TRADE = 0.0005  # 5 bps round-trip slippage/fees assumption
 
 
-def backtest(symbol: str, timeframe: str = "1h", limit: int = 300,
-             stop_mult: float = 1.5, max_hold: int = 8,
-             oversold: float = 30.0, overbought: float = 70.0) -> dict:
-    bars = get_bars(symbol, timeframe=timeframe, limit=limit)
-    if len(bars) < 40:
-        return {"symbol": symbol, "error": f"only {len(bars)} bars"}
-    a = atr(bars) or (bars[-1]["c"] * 0.02)
+def simulate(bars: list[dict], stop_mult: float = 1.5, max_hold: int = 8,
+             oversold: float = 30.0, overbought: float = 70.0,
+             atr_val: float | None = None) -> dict:
+    """Run the RSI/stop rules over a given bar list. Pure, reusable by the tuner."""
+    if len(bars) < 20:
+        return {"trades": 0, "win_rate": None, "avg_return": None,
+                "total_return_pct": 0.0, "returns": []}
+    a = atr_val or atr(bars) or (bars[-1]["c"] * 0.02)
     ta = LiveTA(oversold=oversold, overbought=overbought)
     trades: list[float] = []
     pos = None  # (entry_price, bars_held, stop)
@@ -41,16 +42,15 @@ def backtest(symbol: str, timeframe: str = "1h", limit: int = 300,
         if pos:
             entry, held, stop = pos
             held += 1
-            exit_now, reason = False, ""
+            exit_now = False
             if px <= stop:
-                exit_now, reason = True, "stop"
+                exit_now = True
             elif sig.action == "sell":
-                exit_now, reason = True, "signal"
+                exit_now = True
             elif held >= max_hold:
-                exit_now, reason = True, "time"
+                exit_now = True
             if exit_now:
-                ret = (px - entry) / entry - COST_PER_TRADE
-                trades.append(ret)
+                trades.append((px - entry) / entry - COST_PER_TRADE)
                 pos = None
             else:
                 pos = (entry, held, stop)
@@ -61,11 +61,25 @@ def backtest(symbol: str, timeframe: str = "1h", limit: int = 300,
     for t in trades:
         total *= (1 + t)
     return {
-        "symbol": symbol, "bars": len(bars), "trades": len(trades),
+        "trades": len(trades),
         "win_rate": round(len(wins) / len(trades), 3) if trades else None,
         "avg_return": round(mean(trades), 5) if trades else None,
         "total_return_pct": round((total - 1) * 100, 2) if trades else 0.0,
+        "returns": trades,
     }
+
+
+def backtest(symbol: str, timeframe: str = "1h", limit: int = 300,
+             stop_mult: float = 1.5, max_hold: int = 8,
+             oversold: float = 30.0, overbought: float = 70.0) -> dict:
+    bars = get_bars(symbol, timeframe=timeframe, limit=limit)
+    if len(bars) < 40:
+        return {"symbol": symbol, "error": f"only {len(bars)} bars"}
+    r = simulate(bars, stop_mult, max_hold, oversold, overbought)
+    r["symbol"] = symbol
+    r["bars"] = len(bars)
+    r.pop("returns", None)
+    return r
 
 
 def main():

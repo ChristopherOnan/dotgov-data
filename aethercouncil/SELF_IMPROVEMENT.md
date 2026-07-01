@@ -51,6 +51,14 @@ learning** (learning stored as text/weights the agents read next time).
    ≥20 closed trades, Brier < 0.24, positive PnL after costs. Self-improvement
    is measured, not assumed.
 
+6. **Parameter self-tuning — `tuner.py` + `params.py`** (adapt to drift, don't overfit)
+   Weekly, the RSI thresholds / stop distance / hold are re-searched on recent
+   data — but nothing is adopted unless it beats the current settings ON A
+   HELD-OUT WINDOW it wasn't tuned on, is positive out of sample, and has enough
+   validation trades. Overfit settings die at the validation gate (observed live:
+   a +23% in-sample combo earned -3.6% out of sample and was correctly rejected).
+   Validated params land in params.json and are read live via params.py.
+
 ## How it flows through a single trade
 
 1. `data_guard` verifies the price.

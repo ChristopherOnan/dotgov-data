@@ -39,6 +39,7 @@ finnhub_stream / bars ──▶ stream_indicators (live RSI/MACD/VWAP, FREE)
 | `memory.py` | **episodic memory: recall similar past setups + outcomes** | ✅ live (recall+resolve) |
 | `agent_scorecard.py` | **skill-weight agents by tracked Brier (trust who earns it)** | ✅ live (weights) |
 | `reflection.py` | **nightly: distill outcomes into reusable trading rules** | ✅ live (rules) |
+| `tuner.py` / `params.py` | **weekly OOS-gated self-tuning of RSI/stop params (no overfit)** | ✅ live (gate held) |
 | `x_scout.py` | native X scanning via Grok x_search (used by scout when XAI_API_KEY set) | glue (needs xAI key) |
 | `xai_resilient.py` | retry/backoff direct-xAI client (env-based) | logic |
 | `universe.py` | merge Barchart-100 + Robinhood lists, EXCLUDE health/pharma, block crypto | ✅ live (119 names) |

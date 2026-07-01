@@ -61,9 +61,23 @@ class Position:
     ret: Optional[float] = None   # fractional return after cost
 
 
-def _target_from(entry: float, stop: float, r: float = TARGET_R) -> float:
+def _target_from(entry: float, stop: float, r: float | None = None) -> float:
+    if r is None:
+        try:
+            from params import P
+            r = float(P("target_r", TARGET_R))
+        except Exception:  # noqa: BLE001
+            r = TARGET_R
     risk = entry - stop
     return round(entry + r * risk, 2) if risk > 0 else round(entry * 1.04, 2)
+
+
+def _max_hold() -> int:
+    try:
+        from params import P
+        return int(P("max_hold", MAX_HOLD_DAYS))
+    except Exception:  # noqa: BLE001
+        return MAX_HOLD_DAYS
 
 
 class Portfolio:
@@ -115,8 +129,9 @@ class Portfolio:
     def _resolve_one(self, pos: Position) -> bool:
         """Replay daily bars since entry; close on stop/target/time. True if closed."""
         from bars import get_bars
+        max_hold = _max_hold()
         try:
-            bars = get_bars(pos.symbol, timeframe="1d", limit=MAX_HOLD_DAYS + 5)
+            bars = get_bars(pos.symbol, timeframe="1d", limit=max_hold + 5)
         except Exception as e:  # noqa: BLE001
             log.warning("resolve %s: no bars (%s)", pos.symbol, e)
             return False
@@ -133,7 +148,7 @@ class Portfolio:
                 return self._close(pos, pos.stop, "stop", held)
             if hi is not None and hi >= pos.target:
                 return self._close(pos, pos.target, "target", held)
-            if held >= MAX_HOLD_DAYS:
+            if held >= max_hold:
                 return self._close(pos, close, "time", held)
         return False  # still open, not enough bars yet
 
