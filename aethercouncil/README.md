@@ -32,6 +32,9 @@ finnhub_stream / bars ──▶ stream_indicators (live RSI/MACD/VWAP, FREE)
 | `calibration.py` | Brier scoring / live-gate | ✅ |
 | `validate_models.py` | fail loudly on bad model slugs (vs live OpenRouter list) | ✅ live |
 | `daily_scout.py` | **daily research agents: scan X/web for new models/strategies/tools/catalysts** | ✅ live ($0.03/run) |
+| `subagents.py` | **agents build+manage their own sub-agents on demand (depth/fanout/budget capped)** | ✅ live (spawn + caps) |
+| `portfolio.py` | **paper track record: resolve trades on real bars, score calibration, live-gate** | ✅ live (resolve+gate) |
+| `notify.py` | push alerts to phone (Telegram/email, console fallback) | ✅ live (console) |
 | `x_scout.py` | native X scanning via Grok x_search (used by scout when XAI_API_KEY set) | glue (needs xAI key) |
 | `xai_resilient.py` | retry/backoff direct-xAI client (env-based) | logic |
 | `universe.py` | assemble watchlist, EXCLUDE health/pharma (Finnhub industry) | ✅ logic |
