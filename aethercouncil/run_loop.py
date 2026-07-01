@@ -236,6 +236,9 @@ if __name__ == "__main__":
         print(track_status())
     elif "--board" in sys.argv:      # print the green/red board now
         print(nightly_report(0.0))
+    elif "--picks" in sys.argv:      # "best stocks to buy?" across whole universe
+        from advisor import best_stocks
+        print(asyncio.run(best_stocks())["text"])
     else:
         try:
             asyncio.run(main())

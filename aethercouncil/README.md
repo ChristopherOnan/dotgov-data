@@ -37,7 +37,8 @@ finnhub_stream / bars ──▶ stream_indicators (live RSI/MACD/VWAP, FREE)
 | `notify.py` | push alerts to phone (Telegram/email, console fallback) | ✅ live (console) |
 | `x_scout.py` | native X scanning via Grok x_search (used by scout when XAI_API_KEY set) | glue (needs xAI key) |
 | `xai_resilient.py` | retry/backoff direct-xAI client (env-based) | logic |
-| `universe.py` | assemble watchlist, EXCLUDE health/pharma (Finnhub industry) | ✅ logic |
+| `universe.py` | merge Barchart-100 + Robinhood lists, EXCLUDE health/pharma, block crypto | ✅ live (119 names) |
+| `advisor.py` | **"best stocks to buy?" — screen whole universe → council picks, plain English** | ✅ live ($0.0002) |
 | `autotrader.py` | THE WIRE: signal→gated council→sized paper order | ✅ live end-to-end |
 | `backtest.py` | replay RSI/VWAP rules on history before paper | ✅ live |
 
@@ -52,6 +53,26 @@ WATCH/SKIP and writes a dated brief to `scout_digests/YYYY-MM-DD.md`.
 - Without it → OpenRouter web search (works today; ~$0.03/run).
 - Fires automatically once/day at `SCOUT_HOUR` inside `run_loop.py`, or run it
   standalone: `python3 daily_scout.py` (or `python3 run_loop.py --scout` for cron).
+
+## Ask the council: best stocks to buy
+`advisor.py` answers on demand across the **whole universe** (universe.txt +
+robinhood_lists.txt, health/pharma excluded, crypto blocked). It runs a free
+parallel screen (live price + RSI → 🟢/🔴/🟡) of all ~120 names, then hands the
+green shortlist to the council (which may build sub-agents per name) for a
+decisive, plain-English pick.
+```bash
+python3 advisor.py            # best buys now + council verdict (~$0.0002)
+python3 advisor.py --fast     # free screen only, no council
+python3 run_loop.py --picks   # same, via the loop entrypoint
+```
+Grow coverage anytime: add tickers to `universe.txt`, or paste your Robinhood
+screener/watchlist exports into `robinhood_lists.txt` — both are merged & de-duped.
+
+## Universe
+Trading coverage is the **universe**, not the scout's 5 research themes (those
+scan the outside world for new tools). universe.py loads Barchart-100-style
+liquid names + your Robinhood lists, drops health/pharma (Finnhub industry), and
+hard-blocks crypto. `python3 universe.py` prints the current list.
 
 ## Quickstart (paper, safe)
 ```bash

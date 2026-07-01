@@ -20,13 +20,33 @@ import urllib.request
 
 log = logging.getLogger("aethercouncil.universe")
 
-UNIVERSE_FILE = os.getenv("UNIVERSE_FILE", "universe.txt")
+# Watchlist source files, merged in order. Paste Barchart Top 100 into
+# universe.txt and your Robinhood screener/list exports into robinhood_lists.txt.
+UNIVERSE_FILES = [f.strip() for f in os.getenv(
+    "UNIVERSE_FILES", "universe.txt,robinhood_lists.txt").split(",") if f.strip()]
+UNIVERSE_FILE = os.getenv("UNIVERSE_FILE", "universe.txt")  # back-compat
 SECTOR_CACHE = os.getenv("SECTOR_CACHE", "sector_cache.json")
 
 # Substrings (lowercase) in Finnhub industry that mark health/pharma -> excluded.
 EXCLUDE_KW = ("pharma", "biotech", "health", "medical", "drug", "therapeut",
               "life science", "hospital", "medicine", "clinic", "diagnostic",
               "dental", "genomic")
+
+# Hard crypto guard — the user never trades crypto, so drop any coin/pair that
+# sneaks in via a pasted list (tickers, -USD/ /USD pairs, or USD stablecoins).
+CRYPTO_BLOCK = {
+    "BTC", "ETH", "DOGE", "SOL", "XRP", "ADA", "AVAX", "LTC", "DOT", "SHIB",
+    "MATIC", "LINK", "UNI", "BCH", "ETC", "XLM", "ALGO", "USDT", "USDC", "BNB",
+    "TRX", "PEPE", "WIF", "BONK", "USD", "USDD",
+}
+
+
+def _is_crypto(sym: str) -> bool:
+    s = sym.upper()
+    if s in CRYPTO_BLOCK:
+        return True
+    # pair notations like BTC-USD, ETH/USD, DOGEUSD
+    return bool(("-USD" in s) or ("/USD" in s) or (s.endswith("USD") and len(s) > 3))
 
 # Fallback seed if universe.txt is absent (non-exhaustive large/active names).
 DEFAULT_SEED = [
@@ -72,11 +92,20 @@ def _save_cache(c: dict) -> None:
 
 
 def load_symbols() -> list[str]:
-    if os.path.exists(UNIVERSE_FILE):
-        syms = [l.strip().upper() for l in open(UNIVERSE_FILE)
-                if l.strip() and not l.startswith("#")]
-    else:
+    """Merge every watchlist file that exists; fall back to the seed. Crypto is
+    always dropped (user never trades crypto)."""
+    syms: list[str] = []
+    found = False
+    for path in UNIVERSE_FILES:
+        if os.path.exists(path):
+            found = True
+            for line in open(path):
+                t = line.strip().upper()
+                if t and not t.startswith("#"):
+                    syms.append(t.split()[0])   # tolerate "AAPL  Apple Inc"
+    if not found:
         syms = list(DEFAULT_SEED)
+    syms = [s for s in syms if not _is_crypto(s)]
     return list(dict.fromkeys(syms))  # dedupe, keep order
 
 

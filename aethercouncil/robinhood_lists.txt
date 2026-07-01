@@ -1,0 +1,7 @@
+# Robinhood lists & screeners — paste YOUR symbols here, one per line.
+# This file is MERGED with universe.txt (de-duped), then health/pharma are
+# auto-excluded and crypto is hard-blocked. Trailing text is fine, e.g.:
+#   AAPL   Apple Inc
+# Lines starting with # are ignored. Add as many as you like.
+
+# (paste your Robinhood watchlist / screener symbols below)

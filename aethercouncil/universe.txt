@@ -1,18 +1,142 @@
-# AetherCouncil universe — paste your Barchart Top 100 + Robinhood screener
-# symbols here (one per line). Health/pharma are auto-excluded by universe.py.
-# Lines starting with # are ignored. Seeded with your declared names + tech/AI.
+# AetherCouncil universe — Barchart Top-100-style liquid US equities.
+# One symbol per line; "#" lines and trailing text are ignored.
+# Health/pharma are auto-excluded by universe.py; crypto is hard-blocked.
+# Add/remove freely. Put your Robinhood screener exports in robinhood_lists.txt
+# (both files are merged and de-duped).
+
+# --- your declared core (space / eVTOL / AI) ---
 ASTS
 RKLB
 ACHR
+LUNR
+RDW
+
+# --- mega-cap tech / AI ---
 NVDA
+AAPL
+MSFT
+AMZN
+META
+GOOGL
+GOOG
+AVGO
 TSLA
-PLTR
+NFLX
+ORCL
+CRM
+ADBE
+
+# --- semis / AI hardware ---
 AMD
-MSTR
+MU
+SMCI
+ARM
+TSM
+QCOM
+INTC
+LRCX
+KLAC
+AMAT
+ASML
+ON
+MRVL
+NXPI
+MPWR
+TER
+
+# --- software / cloud / cyber ---
+PLTR
+SNOW
+NET
+DDOG
+CRWD
+PANW
+ZS
+FTNT
+MDB
+NOW
+SHOP
+UBER
+ABNB
 COIN
 HOOD
 SOFI
-MU
-SMCI
-AVGO
-ARM
+AFRM
+SQ
+PYPL
+DASH
+RBLX
+U
+SNAP
+PINS
+SPOT
+
+# --- EV / auto / industrials ---
+F
+GM
+RIVN
+LCID
+NIO
+BA
+CAT
+DE
+GE
+HON
+LMT
+RTX
+NOC
+GD
+UNP
+
+# --- energy / materials ---
+XOM
+CVX
+COP
+OXY
+SLB
+FCX
+NEM
+CCJ
+LIN
+
+# --- financials / payments ---
+JPM
+BAC
+GS
+MS
+WFC
+C
+V
+MA
+AXP
+BLK
+SCHW
+
+# --- consumer / retail / media ---
+WMT
+COST
+HD
+LOW
+NKE
+SBUX
+MCD
+DIS
+CMCSA
+TGT
+LULU
+
+# --- popular momentum / high-volume retail names ---
+MSTR
+MARA
+CLSK
+RIOT
+CVNA
+DKNG
+ROKU
+DELL
+ANET
+CSCO
+IBM
+BABA
+PDD
+JD
