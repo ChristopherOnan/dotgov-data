@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import urllib.request
+from datetime import datetime, timezone
 from statistics import mean
 
 log = logging.getLogger("aethercouncil.bars")
@@ -43,7 +44,8 @@ def _yahoo_bars(symbol: str, rng: str, interval: str) -> list[dict]:
         v = (q.get("volume") or [None] * len(ts))[i]
         if None in (o, h, l, c):
             continue
-        out.append({"o": o, "h": h, "l": l, "c": c, "v": v or 0})
+        t = datetime.fromtimestamp(ts[i], tz=timezone.utc).isoformat()
+        out.append({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v or 0})
     return out
 
 

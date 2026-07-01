@@ -104,13 +104,23 @@ def stop_from_atr(entry: float, atr: float) -> float:
     return round(entry - dist, 2)
 
 
+STATE_PATH = os.getenv("RISK_STATE_PATH", "daily_risk.json")
+
+
 class DailyRisk:
-    """Tracks intraday PnL and enforces the circuit breaker + token budget."""
-    def __init__(self, start_equity: float):
+    """Tracks intraday PnL and enforces the circuit breaker + token budget.
+
+    State persists to disk so a restart does NOT reset the daily loss breaker or
+    token budget mid-day (that would defeat the safety limits). On load, if the
+    saved day is stale it rolls over to a clean slate automatically.
+    """
+    def __init__(self, start_equity: float, persist_path: str | None = STATE_PATH):
         self.start_equity = start_equity
         self.realized = 0.0
         self.tokens_spent = 0.0
         self.day = datetime.now(timezone.utc).date()
+        self.persist_path = persist_path
+        self.load()
 
     def _rollover(self):
         today = datetime.now(timezone.utc).date()
@@ -118,6 +128,49 @@ class DailyRisk:
             self.realized = 0.0
             self.tokens_spent = 0.0
             self.day = today
+            self.save()
+
+    def to_dict(self) -> dict:
+        return {"start_equity": self.start_equity, "realized": self.realized,
+                "tokens_spent": self.tokens_spent, "day": self.day.isoformat()}
+
+    def save(self) -> None:
+        if not self.persist_path:
+            return
+        try:
+            import json
+            with open(self.persist_path, "w") as f:
+                json.dump(self.to_dict(), f)
+        except Exception as e:  # noqa: BLE001
+            log.warning("risk state save failed: %s", e)
+
+    def load(self) -> None:
+        if not self.persist_path or not os.path.exists(self.persist_path):
+            return
+        try:
+            import json
+            from datetime import date
+            with open(self.persist_path) as f:
+                d = json.load(f)
+            saved_day = date.fromisoformat(d.get("day", ""))
+            if saved_day == datetime.now(timezone.utc).date():
+                # same UTC day: resume running totals (breaker/budget intact)
+                self.realized = float(d.get("realized", 0.0))
+                self.tokens_spent = float(d.get("tokens_spent", 0.0))
+                self.day = saved_day
+                log.info("resumed risk state: realized=%.2f tokens=$%.4f",
+                         self.realized, self.tokens_spent)
+            # stale day → keep the fresh zeros from __init__
+        except Exception as e:  # noqa: BLE001
+            log.warning("risk state load failed: %s", e)
+
+    def add_tokens(self, cost: float) -> None:
+        self.tokens_spent += cost or 0.0
+        self.save()
+
+    def add_realized(self, pnl: float) -> None:
+        self.realized += pnl or 0.0
+        self.save()
 
     def trading_halted(self) -> tuple[bool, str]:
         self._rollover()

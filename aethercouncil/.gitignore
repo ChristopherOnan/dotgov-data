@@ -13,6 +13,8 @@ sector_cache.json
 .agent_cache/
 scout_seen.json
 scout_digests/
+paper_portfolio.json
+daily_risk.json
 
 # Python
 __pycache__/

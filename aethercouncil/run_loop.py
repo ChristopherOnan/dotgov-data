@@ -126,28 +126,60 @@ def nightly_report(tokens_today: float) -> str:
     return text
 
 
+def resolve_positions(risk: DailyRisk) -> dict:
+    """Close any paper positions that hit stop/target/time; book PnL to risk."""
+    try:
+        from portfolio import Portfolio
+        pf = Portfolio()
+        before = pf.realized_pnl_dollars()
+        res = pf.resolve_open()
+        if res["closed"]:
+            risk.add_realized(pf.realized_pnl_dollars() - before)
+            log.info("resolved %d position(s); realized today now $%.2f",
+                     res["closed"], risk.realized)
+        return res
+    except Exception as e:  # noqa: BLE001
+        log.warning("position resolve failed: %s", e)
+        return {"closed": 0}
+
+
 async def one_cycle(risk: DailyRisk) -> dict:
+    resolve_positions(risk)                 # first, mark & close finished trades
     halted, why = risk.trading_halted()
     if halted:
         log.info("trading halted: %s", why)
         return {"halted": why}
     out = await run_cycle(dry_run=not PAPER_EXECUTE)
     for d in out.get("decisions", []):
-        risk.tokens_spent += d.get("cost_usd") or 0.0
+        risk.add_tokens(d.get("cost_usd") or 0.0)
     log.info("cycle: %d setups, %d decisions, tokens today $%.4f",
              len(out.get("setups", [])), len(out.get("decisions", [])),
              risk.tokens_spent)
     return out
 
 
+def track_status() -> str:
+    try:
+        from portfolio import Portfolio
+        return Portfolio().track_record_str()
+    except Exception as e:  # noqa: BLE001
+        return f"(track record unavailable: {e})"
+
+
 async def daily_scout_run() -> None:
-    """Fire the research scout once and log a one-line summary."""
+    """Fire the research scout once; log, notify ADOPT/TEST items."""
     try:
         from daily_scout import run_daily_scout
+        from notify import notify
         out = await run_daily_scout()
         log.info("daily scout: %d new items ($%.4f) -> %s",
                  out["new"], out["cost_usd"], out["digest"])
         print(out["summary"])
+        picks = [it for it in out.get("items", [])
+                 if it.get("verdict") in ("ADOPT", "TEST")]
+        if picks:
+            body = "\n".join(f"• {it['verdict']}: {it.get('title','?')}" for it in picks[:10])
+            notify(f"Scout: {len(picks)} new lead(s)", body)
     except Exception as e:  # noqa: BLE001 - scout must never kill the loop
         log.error("daily scout error: %s", e, exc_info=True)
 
@@ -156,12 +188,16 @@ async def main() -> None:
     risk = DailyRisk(START_EQUITY)
     last_report = None
     last_scout = None
+    gate_notified = False
     log.info("loop start: mode=%s execute=%s interval=%ds scout=%s@%02d:00ET",
              TRADING_MODE, PAPER_EXECUTE, INTERVAL, SCOUT_ENABLED, SCOUT_HOUR)
     while True:
         now = datetime.now(ET)
         if now.hour == REPORT_HOUR and last_report != now.date():
-            print(nightly_report(risk.tokens_spent))
+            from notify import notify
+            board = nightly_report(risk.tokens_spent)
+            print(board)
+            notify(f"Daily board {now:%b %d}", board + "\n\n" + track_status())
             last_report = now.date()
         if SCOUT_ENABLED and now.hour == SCOUT_HOUR and last_scout != now.date():
             await daily_scout_run()
@@ -173,6 +209,16 @@ async def main() -> None:
                 log.error("cycle error: %s", e, exc_info=True)
         else:
             log.info("outside 24/5 window (%s ET) — idle", now.strftime("%a %H:%M"))
+        # one-shot alert the moment the live gate clears
+        if not gate_notified:
+            try:
+                from portfolio import Portfolio
+                if Portfolio().track_record().get("live_gate_cleared"):
+                    from notify import notify
+                    notify("LIVE GATE CLEARED", track_status())
+                    gate_notified = True
+            except Exception:  # noqa: BLE001
+                pass
         await asyncio.sleep(INTERVAL)
 
 
@@ -186,6 +232,10 @@ if __name__ == "__main__":
         print(asyncio.run(one_cycle(DailyRisk(START_EQUITY))))
     elif "--scout" in sys.argv:      # run the research scout once (for cron)
         asyncio.run(daily_scout_run())
+    elif "--track" in sys.argv:      # show paper track record + live-gate status
+        print(track_status())
+    elif "--board" in sys.argv:      # print the green/red board now
+        print(nightly_report(0.0))
     else:
         try:
             asyncio.run(main())

@@ -29,6 +29,7 @@ import time
 import calibration
 from agent_pool import deliberate
 from bars import atr, get_bars
+from portfolio import Portfolio
 from trading_engine import (
     DailyRisk, ENTRY_PROB, MAX_POSITIONS, MAX_SLIPPAGE, TRADING_MODE,
     account_snapshot, assert_live_allowed, position_size, stop_from_atr,
@@ -47,10 +48,14 @@ def _has_alpaca() -> bool:
 
 
 class AutoTrader:
-    def __init__(self, risk: DailyRisk | None = None):
+    def __init__(self, risk: DailyRisk | None = None, portfolio: Portfolio | None = None):
         self.risk = risk or DailyRisk(START_EQUITY)
-        self.open_symbols: set[str] = set()
+        self.pf = portfolio or Portfolio()   # persistent paper positions
         self._last: dict[str, float] = {}
+
+    @property
+    def open_symbols(self) -> set[str]:
+        return self.pf.open_symbols()
 
     async def on_signal(self, sym: str, sig) -> dict | None:
         # --- 1. risk / rate gates (all free) --------------------------------
@@ -74,7 +79,7 @@ class AutoTrader:
             f"overnight trade, or stand aside?",
             tickers=[sym],
         )
-        self.risk.tokens_spent += d.get("cost_usd") or 0.0
+        self.risk.add_tokens(d.get("cost_usd") or 0.0)
         prob = d.get("consensus_prob")
         if not prob or prob < ENTRY_PROB:
             calibration.log_prediction(sym, prob or 0.5, "up", "intraday",
@@ -102,7 +107,8 @@ class AutoTrader:
         pid = calibration.log_prediction(sym, prob, "up", "intraday",
                                          note=f"entry qty={qty} stop={stop} lim={limit}")
         self._last[sym] = now
-        self.open_symbols.add(sym)
+        # record the paper position (persistent) so the track record can score it
+        self.pf.open(sym, qty=qty, entry=sig.price, stop=stop, prob=prob, pid=pid)
         order = None
         if PAPER_EXECUTE and _has_alpaca():
             order = await asyncio.to_thread(submit_limit, sym, qty, "buy", limit)
