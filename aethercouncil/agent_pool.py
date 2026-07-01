@@ -243,29 +243,67 @@ async def run_council(client, task, swarm, ledger) -> list[dict]:
     return out
 
 
-async def deliberate(task: str, tickers: list[str] | None = None) -> dict[str, Any]:
+def _votes(results: list[dict]) -> dict[str, float]:
+    """Map model slug -> its parsed probability (for skill scoring)."""
+    out: dict[str, float] = {}
+    for r in results:
+        if r["ok"] and r["text"]:
+            m = _PROB_RE.search(r["text"])
+            if m:
+                try:
+                    out[r["model"]] = max(0.0, min(1.0, float(m.group(1))))
+                except ValueError:
+                    pass
+    return out
+
+
+def _learned_context() -> str:
+    """Self-improvement context: rules distilled from our own tracked outcomes."""
+    try:
+        from reflection import active_rules
+        return active_rules()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+async def deliberate(task: str, tickers: list[str] | None = None,
+                     extra_context: str = "") -> dict[str, Any]:
     client = make_client()
     ledger = Ledger()
-    ctx = ""
+    ctx_parts = []
     if tickers:
         try:
             from market_context import build_market_context
-            ctx = await asyncio.to_thread(build_market_context, tickers)
+            ctx_parts.append(await asyncio.to_thread(build_market_context, tickers))
         except Exception as e:  # noqa: BLE001
             log.warning("no market context: %s", e)
+    # inject learned rules (reflection) + caller-supplied memory recall
+    rules = _learned_context()
+    if rules:
+        ctx_parts.append(rules)
+    if extra_context:
+        ctx_parts.append(extra_context)
+    ctx = "\n\n".join(p for p in ctx_parts if p)
 
     swarm = await run_swarm(client, task, ctx, ledger)
     escalate, reason = _should_escalate(_probs(swarm))
     council = await run_council(client, task, swarm, ledger) if escalate else []
 
-    final_probs = _probs(council) if council else _probs(swarm)
+    votes = _votes(council) if council else _votes(swarm)
+    # skill-weighted consensus (falls back to equal weight until we have history)
+    try:
+        from agent_scorecard import weighted_consensus
+        consensus = weighted_consensus(votes)
+    except Exception:  # noqa: BLE001
+        consensus = round(mean(votes.values()), 4) if votes else None
     return {
         "task": task,
         "escalated": escalate,
         "gate_reason": reason,
         "swarm": [{"role": r["role"], "text": r["text"], "ok": r["ok"]} for r in swarm],
         "council": [{"role": r["role"], "text": r.get("text"), "ok": r["ok"]} for r in council],
-        "consensus_prob": round(mean(final_probs), 3) if final_probs else None,
+        "consensus_prob": round(consensus, 3) if consensus is not None else None,
+        "votes": votes,
         "cost_usd": round(ledger.spent, 6),
         "calls": ledger.calls,
     }

@@ -146,6 +146,17 @@ class Portfolio:
         outcome = 1 if pos.ret > 0 else 0
         if pos.pid:
             calibration.resolve_prediction(pos.pid, outcome)
+            # feed the self-improvement loop with the true outcome
+            try:
+                import memory
+                memory.resolve(pos.pid, outcome, pos.ret)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                import agent_scorecard
+                agent_scorecard.resolve_votes(pos.pid, outcome)
+            except Exception:  # noqa: BLE001
+                pass
         log.info("CLOSE %s @%.2f (%s, held %dd) ret=%.2f%% -> outcome=%d",
                  pos.symbol, exit_price, reason, held, pos.ret * 100, outcome)
         return True

@@ -100,6 +100,19 @@ async def council_pick(greens: list[Row]) -> str:
     """Hand the GREEN shortlist to the council (with sub-agents) for a call."""
     if not greens:
         return "No green setups right now — the council says sit on your hands."
+    # verify the shortlist's prices before recommending (cheap: a handful of names)
+    try:
+        from data_guard import verified_quote
+        clean = []
+        for r in greens:
+            v = verified_quote(r.sym)
+            if v["trust"]:
+                clean.append(r)
+            else:
+                log.warning("dropping %s from picks: %s", r.sym, v["flags"])
+        greens = clean or greens
+    except Exception:  # noqa: BLE001
+        pass
     from subagents import orchestrate
     lines = "\n".join(
         f"- {r.sym}: ${r.price:.2f} ({r.change_pct:+.1f}%), RSI {r.rsi:.0f}, {r.reason}"

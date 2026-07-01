@@ -47,6 +47,16 @@ def _has_alpaca() -> bool:
     return bool(os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_SECRET_KEY"))
 
 
+def _features_from(sig) -> dict:
+    """Normalize a signal into memory features (setup type, RSI, move)."""
+    why = (getattr(sig, "why", "") or "").lower()
+    setup = ("oversold_bounce" if "oversold" in why else
+             "overbought_fade" if "overbought" in why else "signal")
+    return {"rsi": round(getattr(sig, "rsi", None) or 0, 0),
+            "change_pct": getattr(sig, "change_pct", None),
+            "setup": setup}
+
+
 class AutoTrader:
     def __init__(self, risk: DailyRisk | None = None, portfolio: Portfolio | None = None):
         self.risk = risk or DailyRisk(START_EQUITY)
@@ -73,11 +83,19 @@ class AutoTrader:
             return None
 
         # --- 2. gated deliberation (cheap swarm; council only if it escalates)
+        # inject episodic memory of similar past setups (self-improvement)
+        features = _features_from(sig)
+        try:
+            import memory
+            recall = memory.recall(sym, features)
+        except Exception:  # noqa: BLE001
+            recall = ""
         d = await deliberate(
             f"Real-time BUY signal on {sym} at ${sig.price} "
             f"(RSI {sig.rsi:.0f}, {sig.why}). Enter long for a fast intraday/"
             f"overnight trade, or stand aside?",
             tickers=[sym],
+            extra_context=recall,
         )
         self.risk.add_tokens(d.get("cost_usd") or 0.0)
         prob = d.get("consensus_prob")
@@ -109,6 +127,17 @@ class AutoTrader:
         self._last[sym] = now
         # record the paper position (persistent) so the track record can score it
         self.pf.open(sym, qty=qty, entry=sig.price, stop=stop, prob=prob, pid=pid)
+        # feed the self-improvement loop: episodic memory + per-agent votes
+        try:
+            import memory
+            memory.record(pid, sym, features, prob, note=sig.why)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import agent_scorecard
+            agent_scorecard.record_votes(pid, d.get("votes") or {})
+        except Exception:  # noqa: BLE001
+            pass
         order = None
         if PAPER_EXECUTE and _has_alpaca():
             order = await asyncio.to_thread(submit_limit, sym, qty, "buy", limit)

@@ -166,6 +166,17 @@ def track_status() -> str:
         return f"(track record unavailable: {e})"
 
 
+async def reflect_now() -> None:
+    """Nightly learning step: reflect on outcomes and update the rule set."""
+    try:
+        from reflection import reflect
+        out = await reflect()
+        if out.get("rules"):
+            log.info("reflection: %d active rules", len(out["rules"]))
+    except Exception as e:  # noqa: BLE001 - learning must never kill the loop
+        log.error("reflection error: %s", e)
+
+
 async def daily_scout_run() -> None:
     """Fire the research scout once; log, notify ADOPT/TEST items."""
     try:
@@ -197,6 +208,8 @@ async def main() -> None:
             from notify import notify
             board = nightly_report(risk.tokens_spent)
             print(board)
+            # LEARN: nightly reflection distills tracked outcomes into rules
+            await reflect_now()
             notify(f"Daily board {now:%b %d}", board + "\n\n" + track_status())
             last_report = now.date()
         if SCOUT_ENABLED and now.hour == SCOUT_HOUR and last_scout != now.date():
@@ -239,6 +252,10 @@ if __name__ == "__main__":
     elif "--picks" in sys.argv:      # "best stocks to buy?" across whole universe
         from advisor import best_stocks
         print(asyncio.run(best_stocks())["text"])
+    elif "--reflect" in sys.argv:    # run the learning/reflection step now
+        asyncio.run(reflect_now())
+        from reflection import active_rules
+        print(active_rules() or "(no rules yet — need resolved trades)")
     else:
         try:
             asyncio.run(main())

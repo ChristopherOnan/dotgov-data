@@ -35,6 +35,10 @@ finnhub_stream / bars ──▶ stream_indicators (live RSI/MACD/VWAP, FREE)
 | `subagents.py` | **agents build+manage their own sub-agents on demand (depth/fanout/budget capped)** | ✅ live (spawn + caps) |
 | `portfolio.py` | **paper track record: resolve trades on real bars, score calibration, live-gate** | ✅ live (resolve+gate) |
 | `notify.py` | push alerts to phone (Telegram/email, console fallback) | ✅ live (console) |
+| `data_guard.py` | **verify prices: cross-source + outlier reject (clean data for learning)** | ✅ live (catches spikes) |
+| `memory.py` | **episodic memory: recall similar past setups + outcomes** | ✅ live (recall+resolve) |
+| `agent_scorecard.py` | **skill-weight agents by tracked Brier (trust who earns it)** | ✅ live (weights) |
+| `reflection.py` | **nightly: distill outcomes into reusable trading rules** | ✅ live (rules) |
 | `x_scout.py` | native X scanning via Grok x_search (used by scout when XAI_API_KEY set) | glue (needs xAI key) |
 | `xai_resilient.py` | retry/backoff direct-xAI client (env-based) | logic |
 | `universe.py` | merge Barchart-100 + Robinhood lists, EXCLUDE health/pharma, block crypto | ✅ live (119 names) |
@@ -53,6 +57,16 @@ WATCH/SKIP and writes a dated brief to `scout_digests/YYYY-MM-DD.md`.
 - Without it → OpenRouter web search (works today; ~$0.03/run).
 - Fires automatically once/day at `SCOUT_HOUR` inside `run_loop.py`, or run it
   standalone: `python3 daily_scout.py` (or `python3 run_loop.py --scout` for cron).
+
+## Self-improving loop
+The system gets better the longer it runs (no fine-tuning): verified data →
+memory of similar past trades → skill-weighted agent votes → paper outcomes →
+nightly reflection that distills **reusable rules** injected back into decisions.
+See **SELF_IMPROVEMENT.md** for the full architecture and research basis.
+```bash
+python3 run_loop.py --reflect   # run the learning step, print learned rules
+python3 run_loop.py --track     # proof-of-edge: track record + live gate
+```
 
 ## Ask the council: best stocks to buy
 `advisor.py` answers on demand across the **whole universe** (universe.txt +
