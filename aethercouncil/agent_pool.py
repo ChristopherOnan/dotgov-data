@@ -258,12 +258,25 @@ def _votes(results: list[dict]) -> dict[str, float]:
 
 
 def _learned_context() -> str:
-    """Self-improvement context: rules distilled from our own tracked outcomes."""
+    """Self-improvement context: learned rules + the council's shared blackboard.
+    Kept compact on purpose — this is prepended to EVERY deliberation, so every
+    line here costs tokens on every call."""
+    parts = []
     try:
         from reflection import active_rules
-        return active_rules()
+        r = active_rules()
+        if r:
+            parts.append(r)
     except Exception:  # noqa: BLE001
-        return ""
+        pass
+    try:
+        from journal import recent
+        j = recent()
+        if j:
+            parts.append(j)
+    except Exception:  # noqa: BLE001
+        pass
+    return "\n\n".join(parts)
 
 
 async def deliberate(task: str, tickers: list[str] | None = None,

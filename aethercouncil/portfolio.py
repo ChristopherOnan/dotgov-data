@@ -54,11 +54,12 @@ class Position:
     entry_ts: str
     prob: float = 0.5
     pid: str = ""              # calibration prediction id
+    side: str = "long"        # long | short
     status: str = "open"      # open | closed
     exit_price: Optional[float] = None
     exit_ts: Optional[str] = None
     exit_reason: str = ""     # stop | target | time
-    ret: Optional[float] = None   # fractional return after cost
+    ret: Optional[float] = None   # fractional return after cost (directional)
 
 
 def _target_from(entry: float, stop: float, r: float | None = None) -> float:
@@ -113,16 +114,30 @@ class Portfolio:
         return [p for p in self.positions if p.status == "open"]
 
     def open(self, symbol: str, qty: int, entry: float, stop: float,
-             prob: float = 0.5, pid: str = "", target: Optional[float] = None) -> Position:
+             prob: float = 0.5, pid: str = "", target: Optional[float] = None,
+             side: str = "long") -> Position:
+        if target is None:
+            if side == "short":
+                # mirror of the long math: stop ABOVE entry, target = entry - r*risk
+                risk = stop - entry
+                try:
+                    from params import P
+                    r = float(P("target_r", TARGET_R))
+                except Exception:  # noqa: BLE001
+                    r = TARGET_R
+                target = round(entry - r * risk, 2) if risk > 0 else round(entry * 0.96, 2)
+            else:
+                target = _target_from(entry, stop)
         pos = Position(
             symbol=symbol.upper(), qty=qty, entry=round(entry, 2),
-            stop=round(stop, 2), target=target or _target_from(entry, stop),
+            stop=round(stop, 2), target=target,
             entry_ts=datetime.now(timezone.utc).isoformat(), prob=prob, pid=pid,
+            side=side,
         )
         self.positions.append(pos)
         self.save()
-        log.info("OPEN %s qty=%d entry=%.2f stop=%.2f target=%.2f",
-                 pos.symbol, qty, pos.entry, pos.stop, pos.target)
+        log.info("OPEN %s %s qty=%d entry=%.2f stop=%.2f target=%.2f",
+                 pos.side.upper(), pos.symbol, qty, pos.entry, pos.stop, pos.target)
         return pos
 
     # ---- resolution --------------------------------------------------------
@@ -144,10 +159,17 @@ class Portfolio:
         for b in after:
             held += 1
             hi, lo, close = b.get("h"), b.get("l"), b.get("c")
-            if lo is not None and lo <= pos.stop:
-                return self._close(pos, pos.stop, "stop", held)
-            if hi is not None and hi >= pos.target:
-                return self._close(pos, pos.target, "target", held)
+            if pos.side == "short":
+                # short: stop is ABOVE entry (hi breaches it), target BELOW (lo reaches it)
+                if hi is not None and hi >= pos.stop:
+                    return self._close(pos, pos.stop, "stop", held)
+                if lo is not None and lo <= pos.target:
+                    return self._close(pos, pos.target, "target", held)
+            else:
+                if lo is not None and lo <= pos.stop:
+                    return self._close(pos, pos.stop, "stop", held)
+                if hi is not None and hi >= pos.target:
+                    return self._close(pos, pos.target, "target", held)
             if held >= max_hold:
                 return self._close(pos, close, "time", held)
         return False  # still open, not enough bars yet
@@ -157,7 +179,10 @@ class Portfolio:
         pos.exit_price = round(exit_price, 2)
         pos.exit_ts = datetime.now(timezone.utc).isoformat()
         pos.exit_reason = reason
-        pos.ret = round((exit_price - pos.entry) / pos.entry - COST_PER_TRADE, 5)
+        raw = (exit_price - pos.entry) / pos.entry
+        if pos.side == "short":
+            raw = -raw                      # a price drop is a GAIN for a short
+        pos.ret = round(raw - COST_PER_TRADE, 5)
         outcome = 1 if pos.ret > 0 else 0
         if pos.pid:
             calibration.resolve_prediction(pos.pid, outcome)

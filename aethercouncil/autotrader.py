@@ -41,6 +41,7 @@ log = logging.getLogger("aethercouncil.autotrader")
 COOLDOWN = int(os.getenv("SIGNAL_COOLDOWN", "900"))        # sec between acts/symbol
 PAPER_EXECUTE = os.getenv("PAPER_EXECUTE") == "1"
 START_EQUITY = float(os.getenv("START_EQUITY", "10000"))
+ENABLE_SHORTS = os.getenv("ENABLE_SHORTS", "1") == "1"     # short overextended names
 
 
 def _has_alpaca() -> bool:
@@ -73,7 +74,12 @@ class AutoTrader:
         if halted:
             log.info("skip %s: %s", sym, why)
             return None
-        if sig.action != "buy":              # exits handled by stops/sell rules
+        # buy = long entry; sell = overextension -> possible SHORT entry
+        if sig.action == "buy":
+            side = "long"
+        elif sig.action == "sell" and ENABLE_SHORTS:
+            side = "short"
+        else:
             return None
         now = time.time()
         if now - self._last.get(sym, 0) < COOLDOWN:
@@ -81,6 +87,17 @@ class AutoTrader:
         if len(self.open_symbols) >= MAX_POSITIONS:
             log.info("skip %s: at max %d positions", sym, MAX_POSITIONS)
             return None
+        if sym in self.open_symbols:         # never stack/flip on an open name
+            return None
+        # verify the price before any tokens or orders (bad data = no trade)
+        try:
+            from data_guard import verified_quote
+            v = verified_quote(sym)
+            if not v["trust"]:
+                log.warning("skip %s: data_guard %s", sym, v["flags"])
+                return None
+        except Exception:  # noqa: BLE001
+            pass
 
         # --- 2. gated deliberation (cheap swarm; council only if it escalates)
         # inject episodic memory of similar past setups (self-improvement)
@@ -90,25 +107,35 @@ class AutoTrader:
             recall = memory.recall(sym, features)
         except Exception:  # noqa: BLE001
             recall = ""
-        d = await deliberate(
-            f"Real-time BUY signal on {sym} at ${sig.price} "
-            f"(RSI {sig.rsi:.0f}, {sig.why}). Enter long for a fast intraday/"
-            f"overnight trade, or stand aside?",
-            tickers=[sym],
-            extra_context=recall,
-        )
+        if side == "long":
+            q = (f"Real-time BUY signal on {sym} at ${sig.price} "
+                 f"(RSI {sig.rsi:.0f}, {sig.why}). Enter long for a fast intraday/"
+                 f"overnight trade, or stand aside? PROB = probability the trade "
+                 f"is profitable.")
+        else:
+            q = (f"Real-time OVEREXTENSION signal on {sym} at ${sig.price} "
+                 f"(RSI {sig.rsi:.0f}, {sig.why}): it just rolled over from "
+                 f"overbought. Enter a SHORT to capture the fade, or stand aside? "
+                 f"PROB = probability the SHORT is profitable.")
+        d = await deliberate(q, tickers=[sym], extra_context=recall)
         self.risk.add_tokens(d.get("cost_usd") or 0.0)
         prob = d.get("consensus_prob")
+        direction = "up" if side == "long" else "down"
         if not prob or prob < ENTRY_PROB:
-            calibration.log_prediction(sym, prob or 0.5, "up", "intraday",
-                                       note=f"declined @{sig.price}")
-            log.info("stand aside %s: prob=%s < %.2f (cost $%.4f)",
-                     sym, prob, ENTRY_PROB, d.get("cost_usd") or 0)
-            return {"symbol": sym, "action": "stand_aside", "prob": prob}
+            calibration.log_prediction(sym, prob or 0.5, direction, "intraday",
+                                       note=f"declined {side} @{sig.price}")
+            log.info("stand aside %s (%s): prob=%s < %.2f (cost $%.4f)",
+                     sym, side, prob, ENTRY_PROB, d.get("cost_usd") or 0)
+            return {"symbol": sym, "action": "stand_aside", "side": side, "prob": prob}
 
-        # --- 3. size by ATR risk -------------------------------------------
+        # --- 3. size by ATR risk (stop mirrored for shorts) -----------------
         bars = await asyncio.to_thread(get_bars, sym)
-        stop = stop_from_atr(sig.price, atr(bars))
+        a = atr(bars)
+        if side == "short":
+            long_stop = stop_from_atr(sig.price, a)
+            stop = round(2 * sig.price - long_stop, 2)   # same distance, ABOVE entry
+        else:
+            stop = stop_from_atr(sig.price, a)
         if TRADING_MODE == "live":
             assert_live_allowed()
         if _has_alpaca():
@@ -121,16 +148,19 @@ class AutoTrader:
             return {"symbol": sym, "action": "no_size"}
 
         # --- 4. execute (paper LIMIT) + log --------------------------------
-        limit = round(sig.price * (1 + MAX_SLIPPAGE), 2)
-        pid = calibration.log_prediction(sym, prob, "up", "intraday",
-                                         note=f"entry qty={qty} stop={stop} lim={limit}")
+        # long: buy up to limit above; short: sell down to limit below
+        slip = MAX_SLIPPAGE if side == "long" else -MAX_SLIPPAGE
+        limit = round(sig.price * (1 + slip), 2)
+        pid = calibration.log_prediction(sym, prob, direction, "intraday",
+                                         note=f"{side} qty={qty} stop={stop} lim={limit}")
         self._last[sym] = now
         # record the paper position (persistent) so the track record can score it
-        self.pf.open(sym, qty=qty, entry=sig.price, stop=stop, prob=prob, pid=pid)
+        self.pf.open(sym, qty=qty, entry=sig.price, stop=stop, prob=prob,
+                     pid=pid, side=side)
         # feed the self-improvement loop: episodic memory + per-agent votes
         try:
             import memory
-            memory.record(pid, sym, features, prob, note=sig.why)
+            memory.record(pid, sym, {**features, "side": side}, prob, note=sig.why)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -138,13 +168,27 @@ class AutoTrader:
             agent_scorecard.record_votes(pid, d.get("votes") or {})
         except Exception:  # noqa: BLE001
             pass
+        try:
+            import journal
+            journal.log_entry(sym, f"enter_{side}", prob, sig.why, d.get("cost_usd"))
+        except Exception:  # noqa: BLE001
+            pass
         order = None
         if PAPER_EXECUTE and _has_alpaca():
-            order = await asyncio.to_thread(submit_limit, sym, qty, "buy", limit)
-        log.info("ENTER %s qty=%d @limit %.2f stop %.2f prob %.2f pid=%s exec=%s cost=$%.4f",
-                 sym, qty, limit, stop, prob, pid, bool(order), d.get("cost_usd") or 0)
-        return {"symbol": sym, "action": "enter_long", "qty": qty, "limit": limit,
-                "stop": stop, "prob": prob, "pid": pid, "order": order}
+            broker_side = "buy" if side == "long" else "sell"
+            order = await asyncio.to_thread(submit_limit, sym, qty, broker_side, limit)
+        log.info("ENTER %s %s qty=%d @limit %.2f stop %.2f prob %.2f pid=%s exec=%s cost=$%.4f",
+                 side.upper(), sym, qty, limit, stop, prob, pid, bool(order),
+                 d.get("cost_usd") or 0)
+        try:
+            from notify import notify
+            notify(f"{'📈 LONG' if side == 'long' else '📉 SHORT'} {sym}",
+                   f"qty {qty} @ ~${sig.price:.2f}, stop ${stop:.2f}, "
+                   f"prob {prob:.2f} — {sig.why}")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"symbol": sym, "action": f"enter_{side}", "side": side, "qty": qty,
+                "limit": limit, "stop": stop, "prob": prob, "pid": pid, "order": order}
 
 
 # end-to-end wiring test with a synthetic signal.

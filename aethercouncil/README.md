@@ -40,11 +40,12 @@ finnhub_stream / bars ──▶ stream_indicators (live RSI/MACD/VWAP, FREE)
 | `agent_scorecard.py` | **skill-weight agents by tracked Brier (trust who earns it)** | ✅ live (weights) |
 | `reflection.py` | **nightly: distill outcomes into reusable trading rules** | ✅ live (rules) |
 | `tuner.py` / `params.py` | **weekly OOS-gated self-tuning of RSI/stop params (no overfit)** | ✅ live (gate held) |
+| `journal.py` | **shared blackboard: recent decisions + open positions in every prompt** | ✅ live |
 | `x_scout.py` | native X scanning via Grok x_search (used by scout when XAI_API_KEY set) | glue (needs xAI key) |
 | `xai_resilient.py` | retry/backoff direct-xAI client (env-based) | logic |
 | `universe.py` | merge Barchart-100 + Robinhood lists, EXCLUDE health/pharma, block crypto | ✅ live (119 names) |
 | `advisor.py` | **"best stocks to buy?" — screen whole universe → council picks, plain English** | ✅ live ($0.0002) |
-| `autotrader.py` | THE WIRE: signal→gated council→sized paper order | ✅ live end-to-end |
+| `autotrader.py` | THE WIRE: signal→verified→gated council→sized LONG or SHORT paper order | ✅ live (both sides) |
 | `backtest.py` | replay RSI/VWAP rules on history before paper | ✅ live |
 
 _No crypto module: this stack never monitors or trades crypto by design._

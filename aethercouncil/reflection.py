@@ -150,7 +150,7 @@ async def reflect() -> dict:
     log.info("reflection: %d rules now active", len(_load_rules()))
     return {"reflection": data.get("reflection", ""),
             "rules": [r["rule"] for r in _load_rules()],
-            "cost_usd": round(getattr(__import__('agent_pool').Ledger(), 'spent', 0.0), 6)}
+            "cost_usd": round(ledger.spent, 6)}
 
 
 def _cli() -> None:

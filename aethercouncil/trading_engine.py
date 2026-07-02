@@ -88,8 +88,9 @@ def scan_setups(quotes: dict) -> list[Setup]:
 def position_size(equity: float, entry: float, stop: float,
                   buying_power: float) -> int:
     """Shares sized so a stop-out loses ~RISK_FRAC of equity. Capped by
-    exposure and buying power. Returns whole shares (0 if not viable)."""
-    per_share_risk = entry - stop
+    exposure and buying power. Returns whole shares (0 if not viable).
+    Direction-agnostic: for shorts the stop is ABOVE entry; risk is |entry-stop|."""
+    per_share_risk = abs(entry - stop)
     if per_share_risk <= 0 or entry <= 0:
         return 0
     by_risk = (equity * RISK_FRAC) / per_share_risk
@@ -239,11 +240,61 @@ def account_snapshot() -> dict:
 
 
 # ---- one decision cycle ----------------------------------------------------
+_DELIB_LAST: dict[str, float] = {}          # per-symbol deliberation cooldown
+DELIB_COOLDOWN = int(os.getenv("SIGNAL_COOLDOWN", "900"))
+
+
+def _watch_symbols() -> list[str]:
+    """WATCHLIST env override, else the FULL universe (Barchart + Robinhood)."""
+    env = [s.strip() for s in os.getenv("WATCHLIST", "").split(",") if s.strip()]
+    if env:
+        return env
+    try:
+        from universe import get_universe
+        return get_universe()
+    except Exception as e:  # noqa: BLE001
+        log.warning("universe unavailable (%s); using seed watchlist", e)
+        return WATCHLIST
+
+
+def _scan_quotes(symbols: list[str]) -> dict:
+    """Parallel Yahoo-only scan (no Finnhub: 119 syms/min would blow its rate
+    limit). Finnhub is reserved for data_guard verification of triggered setups."""
+    from concurrent.futures import ThreadPoolExecutor
+    from market_data import _yahoo
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        qs = list(ex.map(_yahoo, symbols))
+    return {q.symbol: q for q in qs if q and q.price is not None}
+
+
 async def run_cycle(dry_run: bool = True) -> dict:
     """Watch -> (on trigger) decide -> risk-check -> (paper) order. Token-frugal."""
-    from market_data import get_quotes
-    quotes = await asyncio.to_thread(get_quotes, WATCHLIST)
+    import time as _time
+    watch = _watch_symbols()
+    quotes = await asyncio.to_thread(_scan_quotes, watch)
     setups = scan_setups(quotes)
+    # cooldown first (free), then PARALLEL cross-source verification, and cap
+    # deliberations per cycle: with a cycle every minute, 2/cycle is plenty for
+    # 5-10 trades/day and keeps both latency and token spend bounded.
+    max_delibs = int(os.getenv("MAX_DELIBS_PER_CYCLE", "2"))
+    cooled = [s for s in setups
+              if _time.time() - _DELIB_LAST.get(s.symbol, 0) >= DELIB_COOLDOWN]
+    candidates = cooled[:max_delibs * 2]          # verify a few extra in case some fail
+    verified: list = []
+    if candidates:
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from data_guard import verified_quote
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                checks = list(ex.map(lambda s: verified_quote(s.symbol), candidates))
+            for s, v in zip(candidates, checks):
+                if v["trust"]:
+                    verified.append(s)
+                else:
+                    log.warning("setup %s rejected by data_guard: %s", s.symbol, v["flags"])
+        except Exception:  # noqa: BLE001
+            verified = candidates
+    setups = verified[:max_delibs]
     out = {"scanned": len(quotes), "setups": [s.__dict__ for s in setups],
            "decisions": [], "mode": TRADING_MODE, "dry_run": dry_run}
     if not setups:
@@ -252,6 +303,7 @@ async def run_cycle(dry_run: bool = True) -> dict:
 
     from agent_pool import deliberate
     for s in setups[:MAX_POSITIONS]:
+        _DELIB_LAST[s.symbol] = _time.time()
         d = await deliberate(
             f"Setup on {s.symbol}: {s.reason} at ${s.price}. Enter long, "
             f"exit, or stand aside for an overnight/catalyst hold?",
@@ -261,6 +313,11 @@ async def run_cycle(dry_run: bool = True) -> dict:
         act = "enter_long" if (prob and prob >= ENTRY_PROB) else "stand_aside"
         out["decisions"].append({"symbol": s.symbol, "prob": prob,
                                  "action": act, "cost_usd": d.get("cost_usd")})
+        try:
+            import journal
+            journal.log_entry(s.symbol, act, prob, s.reason, d.get("cost_usd"))
+        except Exception:  # noqa: BLE001
+            pass
         # NOTE: real order placement (below) intentionally left behind dry_run
         # until you've paper-validated. Sizing/stop wiring shown for review.
         if act == "enter_long" and not dry_run:
