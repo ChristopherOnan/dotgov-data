@@ -50,17 +50,25 @@ def _yahoo_bars(symbol: str, rng: str, interval: str) -> list[dict]:
 
 
 def _alpaca_bars(symbol: str, timeframe: str, limit: int) -> list[dict]:
+    from datetime import timedelta
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     key, sec = os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY")
     tf = {"1d": TimeFrame.Day, "1h": TimeFrame.Hour, "1m": TimeFrame.Minute}.get(
         timeframe, TimeFrame.Day)
+    # Alpaca defaults start to "now" — must look back far enough to fill `limit`
+    # (calendar days ≈ 1.6x trading days; hours ≈ limit/7 trading hours per day).
+    days_back = {"1d": int(limit * 1.6) + 5, "1h": limit // 6 + 5,
+                 "1m": limit // 390 + 2}.get(timeframe, limit * 2)
+    start = datetime.now(timezone.utc) - timedelta(days=days_back)
     client = StockHistoricalDataClient(key, sec)
-    req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=tf, limit=limit)
+    # NOTE: Alpaca fills `limit` from `start` FORWARD (oldest first), so don't
+    # cap the request — fetch the window and keep the most recent `limit` bars.
+    req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start)
     bars = client.get_stock_bars(req).data.get(symbol, [])
-    return [{"o": b.open, "h": b.high, "l": b.low, "c": b.close, "v": b.volume}
-            for b in bars]
+    return [{"t": b.timestamp.isoformat(), "o": b.open, "h": b.high,
+             "l": b.low, "c": b.close, "v": b.volume} for b in bars][-limit:]
 
 
 def get_bars(symbol: str, timeframe: str = "1d", limit: int = 30) -> list[dict]:
