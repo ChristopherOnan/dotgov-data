@@ -102,7 +102,32 @@ python3 run_loop.py                    # run forever (trading loop + daily scout
 # to place PAPER orders: export PAPER_EXECUTE=1  (needs Alpaca paper keys)
 ```
 
-### Daily scout via cron (e.g. on GCP), if not using run_loop's built-in timer
+## Run 24/7 with your laptop closed (GCP, free tier)
+The loop must live in the cloud to survive your laptop sleeping. One command
+puts it on an always-free `e2-micro` VM with a systemd service (starts on boot,
+restarts on crash):
+
+1. Open **Cloud Shell** in your browser: console.cloud.google.com → `>_` icon
+   (top right). This is a terminal in the cloud — nothing runs on your laptop.
+2. ```bash
+   git clone <your-repo> && cd <repo>/aethercouncil
+   cp .env.example .env && nano .env    # paste your real keys, PAPER_EXECUTE=1
+   bash deploy/deploy_gcp.sh
+   ```
+3. Close the laptop. Done.
+
+Manage it from any browser via Cloud Shell:
+```bash
+gcloud compute ssh aethercouncil --zone=us-central1-a -- 'sudo journalctl -u aethercouncil -f'   # live logs
+gcloud compute ssh aethercouncil --zone=us-central1-a -- 'cd /opt/aethercouncil && sudo -u aether python3 run_loop.py --track'  # track record
+gcloud compute instances stop aethercouncil --zone=us-central1-a                                  # kill switch
+```
+Secrets travel over encrypted SSH (`gcloud scp`), never through git. For
+phone push with zero terminals, set `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`
+in `.env` before deploying — the daily board and every entry alert lands on
+your phone.
+
+### Daily scout via cron (alternative), if not using run_loop's built-in timer
 ```cron
 # 07:00 America/New_York every weekday — daily research digest
 0 7 * * 1-5  cd /path/to/aethercouncil && /usr/bin/python3 run_loop.py --scout >> scout.log 2>&1

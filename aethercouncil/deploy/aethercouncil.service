@@ -1,0 +1,23 @@
+[Unit]
+Description=AetherCouncil autonomous paper-trading loop (24/5)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aether
+WorkingDirectory=/opt/aethercouncil
+EnvironmentFile=/opt/aethercouncil/.env
+ExecStart=/usr/bin/python3 /opt/aethercouncil/run_loop.py
+# never die silently: restart on any exit, with backoff
+Restart=always
+RestartSec=30
+# keep logs bounded and inspectable via journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aethercouncil
+# hard memory cap so a leak can't take down the micro VM
+MemoryMax=700M
+
+[Install]
+WantedBy=multi-user.target
