@@ -208,15 +208,42 @@ async def run_swarm(client, task, ctx, ledger) -> list[dict]:
 
 
 def _should_escalate(probs: list[float]) -> tuple[bool, str]:
+    """Premium council fires ONLY on high-level decisions: a trade about to
+    trigger (high conviction) or a genuine disagreement worth a tiebreak.
+    A cheap-provider hiccup (too few parsed votes) must NEVER buy premium
+    tokens — weak signal means stand aside, which costs nothing."""
     if len(probs) < 2:
-        return True, "insufficient swarm signal"
+        return False, "insufficient swarm signal — stand aside (no premium spend)"
     spread = pstdev(probs)
     conviction = abs(mean(probs) - 0.5)
     if spread >= DIVERGENCE_THRESH:
         return True, f"swarm disagreement (stdev={spread:.2f})"
     if conviction >= CONVICTION_THRESH:
-        return True, f"high conviction (mean={mean(probs):.2f})"
+        return True, f"high conviction (mean={mean(probs):.2f}) — final-trigger review"
     return False, f"swarm consensus, low stakes (stdev={spread:.2f})"
+
+
+# ---- hard daily ceiling on premium council calls ----------------------------
+COUNCIL_MAX_PER_DAY = int(os.getenv("COUNCIL_MAX_PER_DAY", "10"))
+_COUNCIL_COUNT_PATH = os.getenv("COUNCIL_COUNT_PATH", "council_count.json")
+
+
+def _council_budget_ok() -> bool:
+    """True if today's premium-council call count is under the daily cap."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        d = json.load(open(_COUNCIL_COUNT_PATH))
+    except Exception:  # noqa: BLE001
+        d = {}
+    n = d.get("n", 0) if d.get("day") == today else 0
+    if n >= COUNCIL_MAX_PER_DAY:
+        return False
+    try:
+        json.dump({"day": today, "n": n + 1}, open(_COUNCIL_COUNT_PATH, "w"))
+    except Exception:  # noqa: BLE001
+        pass
+    return True
 
 
 _COUNCIL_SYS = (
@@ -300,6 +327,10 @@ async def deliberate(task: str, tickers: list[str] | None = None,
 
     swarm = await run_swarm(client, task, ctx, ledger)
     escalate, reason = _should_escalate(_probs(swarm))
+    if escalate and not _council_budget_ok():
+        escalate = False
+        reason += f" — but daily council cap ({COUNCIL_MAX_PER_DAY}) reached; swarm-only"
+        log.warning("premium council capped for today (%d calls)", COUNCIL_MAX_PER_DAY)
     council = await run_council(client, task, swarm, ledger) if escalate else []
 
     votes = _votes(council) if council else _votes(swarm)

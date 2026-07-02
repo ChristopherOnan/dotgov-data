@@ -20,6 +20,7 @@ agent_scores.jsonl
 rules.json
 params.json
 journal.jsonl
+council_count.json
 
 # Python
 __pycache__/
